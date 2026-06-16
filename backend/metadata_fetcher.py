@@ -149,25 +149,11 @@ def clean_title_for_tag(title: str) -> str:
     return title.strip(' -–—|')
 
 
-def apply_metadata(filepath: str, raw_title: str) -> bool:
+def _fetch_from_itunes(search_query: str, fallback_title: str):
+    from config import CHROME_IMPERSONATE
+    url = f"https://itunes.apple.com/search?term={urllib.parse.quote(search_query)}&entity=song&limit=1"
     try:
-        search_query = clean_title(raw_title)
-        if not search_query: return False
-        
-        # Fallback clean title to use if iTunes doesn't find a match
-        fallback_title = clean_title_for_tag(raw_title)
-        
-        # Request from iTunes API
-        url = f"https://itunes.apple.com/search?term={urllib.parse.quote(search_query)}&entity=song&limit=1"
-        from config import CHROME_IMPERSONATE
-        res = requests.get(url, timeout=15, impersonate=CHROME_IMPERSONATE)
-        
-        itunes_found = False
-        track_name = fallback_title
-        artist_name = ''
-        album_name = ''
-        cover_data = None
-
+        res = requests.get(url, timeout=10, impersonate=CHROME_IMPERSONATE)
         if res.status_code == 200:
             data = res.json()
             if data.get('results'):
@@ -176,15 +162,122 @@ def apply_metadata(filepath: str, raw_title: str) -> bool:
                 artist_name = track.get('artistName', '')
                 album_name = track.get('collectionName', '')
                 cover_url = track.get('artworkUrl100', '')
-                itunes_found = True
                 
-                # Get 1000x1000 High Res cover
+                cover_data = None
                 if cover_url:
                     cover_url = cover_url.replace('100x100bb', '1000x1000bb')
-                    cover_res = requests.get(cover_url, timeout=15, impersonate=CHROME_IMPERSONATE)
-                    cover_data = cover_res.content if cover_res.status_code == 200 else None
+                    cover_res = requests.get(cover_url, timeout=10, impersonate=CHROME_IMPERSONATE)
+                    if cover_res.status_code == 200:
+                        cover_data = cover_res.content
+                return track_name, artist_name, album_name, cover_data
+    except Exception as e:
+        print(f"      \033[90m[metadata:warn] Erro no iTunes: {e}\033[0m")
+    return None
 
-        # Always write at minimum the cleaned title (even if iTunes failed)
+def _fetch_from_deezer(search_query: str, fallback_title: str):
+    from config import CHROME_IMPERSONATE
+    url = f"https://api.deezer.com/search?q={urllib.parse.quote(search_query)}&limit=1"
+    try:
+        res = requests.get(url, timeout=10, impersonate=CHROME_IMPERSONATE)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get('data'):
+                track = data['data'][0]
+                track_name = track.get('title', fallback_title)
+                artist_name = track.get('artist', {}).get('name', '')
+                album_name = track.get('album', {}).get('title', '')
+                cover_url = track.get('album', {}).get('cover_xl', '')
+                
+                cover_data = None
+                if cover_url:
+                    cover_res = requests.get(cover_url, timeout=10, impersonate=CHROME_IMPERSONATE)
+                    if cover_res.status_code == 200:
+                        cover_data = cover_res.content
+                return track_name, artist_name, album_name, cover_data
+    except Exception as e:
+        print(f"      \033[90m[metadata:warn] Erro no Deezer: {e}\033[0m")
+    return None
+
+def _fetch_from_spotify(search_query: str, fallback_title: str):
+    from config import CHROME_IMPERSONATE
+    try:
+        from magic_parsers import get_spotify_token
+        token = get_spotify_token()
+        if not token: return None
+        
+        url = f"https://api.spotify.com/v1/search?q={urllib.parse.quote(search_query)}&type=track&limit=1"
+        headers = {"Authorization": f"Bearer {token}"}
+        res = requests.get(url, headers=headers, timeout=10, impersonate=CHROME_IMPERSONATE)
+        if res.status_code == 200:
+            data = res.json()
+            items = data.get('tracks', {}).get('items', [])
+            if items:
+                track = items[0]
+                track_name = track.get('name', fallback_title)
+                artist_name = ", ".join([a.get('name', '') for a in track.get('artists', [])])
+                album_name = track.get('album', {}).get('name', '')
+                
+                cover_data = None
+                images = track.get('album', {}).get('images', [])
+                if images:
+                    cover_url = images[0].get('url') # [0] is usually the largest (640x640)
+                    if cover_url:
+                        cover_res = requests.get(cover_url, timeout=10, impersonate=CHROME_IMPERSONATE)
+                        if cover_res.status_code == 200:
+                            cover_data = cover_res.content
+                return track_name, artist_name, album_name, cover_data
+    except Exception as e:
+        print(f"      \033[90m[metadata:warn] Erro no Spotify: {e}\033[0m")
+    return None
+
+def apply_metadata(filepath: str, raw_title: str, fallback_cover_url: str = None) -> bool:
+    try:
+        search_query = clean_title(raw_title)
+        if not search_query: return False
+        
+        fallback_title = clean_title_for_tag(raw_title)
+        
+        track_name = fallback_title
+        artist_name = ''
+        album_name = ''
+        cover_data = None
+        source_found = None
+        
+        # 1. Tenta iTunes (Melhor qualidade de capa)
+        res = _fetch_from_itunes(search_query, fallback_title)
+        if res:
+            track_name, artist_name, album_name, cover_data = res
+            source_found = "iTunes"
+        else:
+            print("      \033[90m[metadata] iTunes falhou. Buscando no Spotify...\033[0m")
+            # 2. Tenta Spotify (Ótimo para encontrar a música)
+            res = _fetch_from_spotify(search_query, fallback_title)
+            if res:
+                track_name, artist_name, album_name, cover_data = res
+                source_found = "Spotify"
+            else:
+                print("      \033[90m[metadata] Spotify falhou. Buscando no Deezer...\033[0m")
+                # 3. Tenta Deezer (Fallback final super robusto)
+                res = _fetch_from_deezer(search_query, fallback_title)
+                if res:
+                    track_name, artist_name, album_name, cover_data = res
+                    source_found = "Deezer"
+
+        if source_found:
+            print(f"      \033[32m[metadata] Metadados premium encontrados via {source_found}!\033[0m")
+        else:
+            if fallback_cover_url:
+                print(f"      \033[90m[metadata] Nenhuma fonte premium. Resgatando capa original do provedor...\033[0m")
+                from config import CHROME_IMPERSONATE
+                try:
+                    cover_res = requests.get(fallback_cover_url, timeout=10, impersonate=CHROME_IMPERSONATE)
+                    if cover_res.status_code == 200:
+                        cover_data = cover_res.content
+                        print(f"      \033[32m[metadata] Capa original resgatada com sucesso!\033[0m")
+                except Exception as e:
+                    pass
+            
+        # Write to file
         if filepath.lower().endswith('.mp3'):
             audio = MP3(filepath, ID3=ID3)
             if audio.tags is None: audio.add_tags()
@@ -199,6 +292,7 @@ def apply_metadata(filepath: str, raw_title: str) -> bool:
             
         elif filepath.lower().endswith('.m4a') or filepath.lower().endswith('.mp4'):
             audio = MP4(filepath)
+            if audio.tags is None: audio.add_tags()
             audio.tags['©nam'] = track_name
             if artist_name: audio.tags['©ART'] = artist_name
             if album_name: audio.tags['©alb'] = album_name
@@ -208,6 +302,7 @@ def apply_metadata(filepath: str, raw_title: str) -> bool:
             
         elif filepath.lower().endswith('.flac'):
             audio = FLAC(filepath)
+            if audio.tags is None: audio.add_tags()
             audio['title'] = track_name
             if artist_name: audio['artist'] = artist_name
             if album_name: audio['album'] = album_name
@@ -221,13 +316,12 @@ def apply_metadata(filepath: str, raw_title: str) -> bool:
                 audio.add_picture(pic)
             audio.save()
             
-        if itunes_found:
+        if source_found:
             return True
         else:
-            # iTunes didn't find, but we still cleaned the title tag
-            print(f"      \033[90m[metadata] iTunes nao encontrou, titulo limpo aplicado: '{track_name}'\033[0m")
+            print(f"      \033[90m[metadata] Nenhuma fonte encontrou. Titulo limpo aplicado: '{track_name}'\033[0m")
             return False
 
     except Exception as e:
-        print(f"      \033[90m[metadata:warn] Falha ao aplicar metadados do iTunes: {e}\033[0m")
+        print(f"      \033[90m[metadata:warn] Falha fatal ao aplicar metadados: {e}\033[0m")
         return False

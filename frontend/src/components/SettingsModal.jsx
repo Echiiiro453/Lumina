@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+
 import axios from 'axios';
 import { Settings, CheckCircle, AlertCircle, Upload, Mic, Power, Terminal, Database, RefreshCw, Globe, Palette, Download, Monitor } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,6 +12,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [activeLang, setActiveLang] = useState(getLanguage());
+  const [lastfmUser, setLastfmUser] = useState('');
+  const [lastfmPass, setLastfmPass] = useState('');
+  const [isSavingLastfm, setIsSavingLastfm] = useState(false);
   
   const [voiceStatus, setVoiceStatus] = useState('stopped');
   
@@ -20,12 +24,26 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     }
   }, [isOpen]);
 
+  
+  const handleSaveLastfm = async () => {
+    setIsSavingLastfm(true);
+    try {
+      await axios.post(`${apiUrl}/api/settings/lastfm`, { username: lastfmUser, password: lastfmPass });
+      alert(lastfmUser && lastfmPass ? "Login do Last.fm confirmado e salvo com sucesso!" : "Credenciais do Last.fm removidas.");
+    } catch(e) { 
+      alert(e.response?.data?.detail || "Erro ao conectar com Last.fm"); 
+    } finally {
+      setIsSavingLastfm(false);
+    }
+  };
+
   const fetchVoiceStatus = async () => {
     try {
       const res = await axios.get(`${apiUrl}/api/voice/status`);
       setVoiceStatus(res.data.status);
     } catch (e) {
       console.error('Failed to get voice status', e);
+        alert('Erro ao checar status do motor de voz: ' + e.message);
     }
   };
 
@@ -43,6 +61,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       }
     } catch (e) {
       console.error('Failed to toggle voice', e);
+        alert('Erro ao ativar motor de voz: ' + e.message);
     }
   };
   const [concurrentDownloads, setConcurrentDownloads] = React.useState(2);
@@ -154,6 +173,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       await axios.post(`${apiUrl}/api/system/startup?enable=${newVal}`);
     } catch (err) {
       console.error("Erro ao configurar inicialização:", err);
+        alert('Erro ao configurar inicialização junto ao Windows: ' + err.message);
     }
   };
 
@@ -171,6 +191,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       axios.get(`${apiUrl}/api/settings/miniplayer_hotkey`)
         .then(res => setMiniplayerHotkey(res.data.hotkey))
         .catch(console.error);
+      axios.get(`${apiUrl}/api/settings/lastfm`)
+        .then(res => { setLastfmUser(res.data.username); setLastfmPass(res.data.password); })
+        .catch(console.error);
     }
   }, [isOpen, apiUrl]);
 
@@ -180,6 +203,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       await axios.post(`${apiUrl}/api/settings/concurrent_downloads`, { value: val });
     } catch (e) {
       console.error('Failed to save concurrent downloads setting', e);
+        alert('Erro ao salvar limite de downloads: ' + e.message);
     }
   };
 
@@ -519,7 +543,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
               <div className="p-4 bg-surface-container-high rounded-3xl border border-outline-variant/30 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-white text-sm">Downloads Simultâneos</h4>
+                    <h4 className="font-bold text-white text-sm">{t('settingsConcurrent') || 'Downloads Simultâneos'}</h4>
                     {concurrentDownloads > 4 ? (
                       <p className="text-xs text-error mt-0.5">⚠️ Valores altos podem causar travamentos por alto uso de CPU/RAM.</p>
                     ) : (
@@ -667,6 +691,50 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
                     {syncResult.error}
                   </div>
                 )}
+              </div>
+
+
+              <div className="pt-4 mt-4 border-t border-outline-variant/20">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center text-red-500">
+                    <span>🎵</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-on-surface">Last.fm Scrobbling</p>
+                    <p className="text-xs text-on-surface-variant">Registre automaticamente</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-on-surface-variant">Usuario</label>
+                    <input
+                      type="text"
+                      value={lastfmUser}
+                      onChange={(e) => setLastfmUser(e.target.value)}
+                      
+                      className="w-full bg-surface-variant rounded-xl px-4 py-3 text-sm text-on-surface outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-on-surface-variant">Senha</label>
+                    <input
+                      type="password"
+                      value={lastfmPass}
+                      onChange={(e) => setLastfmPass(e.target.value)}
+                      
+                      className="w-full bg-surface-variant rounded-xl px-4 py-3 text-sm text-on-surface outline-none"
+                    />
+                  </div>
+                </div>
+                  <div className="flex justify-end mt-4">
+                    <button 
+                      onClick={handleSaveLastfm}
+                      disabled={isSavingLastfm}
+                      className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold disabled:opacity-50 transition-colors shadow-lg"
+                    >
+                      {isSavingLastfm ? 'Testando login...' : 'Salvar Login do Last.fm'}
+                    </button>
+                  </div>
               </div>
 
               {/* Shutdown */}

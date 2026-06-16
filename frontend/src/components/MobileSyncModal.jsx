@@ -76,7 +76,7 @@ export default function MobileSyncModal({ isOpen, onClose }) {
             </div>
             <div>
               <h2 className="text-lg font-bold text-on-surface">Sincronizar com Celular</h2>
-              <p className="text-xs text-on-surface-variant">Acesso via rede local Wi-Fi</p>
+              <p className="text-xs text-on-surface-variant">{t('syncLocalWifi') || 'Acesso via rede local Wi-Fi'}</p>
             </div>
           </div>
           <button
@@ -134,7 +134,7 @@ export default function MobileSyncModal({ isOpen, onClose }) {
                   </div>
 
                   <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-on-surface">Escaneie o QR Code</h3>
+                    <h3 className="text-lg font-bold text-on-surface">{t('syncScanQR') || 'Escaneie o QR Code'}</h3>
                     <p className="text-on-surface-variant text-sm flex items-center justify-center gap-1.5">
                       <Wifi className="w-4 h-4" />
                       Sessão segura válida por 5 minutos

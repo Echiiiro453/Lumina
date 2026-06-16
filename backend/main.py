@@ -64,6 +64,21 @@ from urllib.parse import urlparse
 
 app = FastAPI()
 
+from routers.downloads import router as downloads_router
+from routers.library import router as library_router
+from routers.settings import router as settings_router
+from routers.mobile import router as mobile_router
+from routers.studio import router as studio_router
+from routers.stream import router as stream_router
+
+app.include_router(downloads_router)
+app.include_router(library_router)
+app.include_router(settings_router)
+app.include_router(mobile_router)
+app.include_router(studio_router)
+app.include_router(stream_router)
+
+
 origins = ["http://localhost:5173", "http://localhost:3000", "http://localhost:8000", "*"]
 
 app.add_middleware(
@@ -279,38 +294,11 @@ async def startup_event():
     except Exception as e:
         print(f"[Startup] Error registering hotkey: {e}")
 
-class DownloadRequest(BaseModel):
-    url: str
-    quality: str = "best"
-    format: str = "mp3"
-    mode: str = "audio"
-    playlist: bool = False
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    pitch: int = 0
-    speed: float = 1.0
-    title: Optional[str] = None
-    artist: Optional[str] = None
-    cover_path: Optional[str] = None
-    browser_cookies: Optional[str] = None
-    video_codec: Optional[str] = "auto"
-    compress_video: Optional[bool] = False
-    cookies_path: Optional[str] = None
-    eq_preset: Optional[str] = None
-    playlist_id: Optional[str] = None
-    video_id: Optional[str] = None
-    organize: bool = False
-    organize_by_playlist: bool = False
-    sponsorblock_enabled: bool = False
-    subtitle: Optional[str] = "none"
 
 class InfoRequest(BaseModel):
     url: str
     limit: int = 50
 
-class SearchRequest(BaseModel):
-    query: str
-    limit: int = 30
 
 class RetryRequest(BaseModel):
     playlist_id: str
@@ -580,127 +568,6 @@ def save_preset(preset: PresetData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/search")
-async def search_youtube(request: SearchRequest):
-    query = request.query.strip()
-    is_ytm = False
-    if query.lower().startswith("music:"):
-        is_ytm = True
-        query = query[6:].strip()
-    elif query.lower().startswith("ytm:"):
-        is_ytm = True
-        query = query[4:].strip()
-
-    if is_ytm:
-        try:
-            import json
-            import requests as cffi_requests
-            api_url = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "com.google.android.apps.youtube.music/6.20.51 (Linux; U; Android 13; en_US) gzip"
-            }
-            payload = {
-                "context": {
-                    "client": {
-                        "clientName": "ANDROID_MUSIC",
-                        "clientVersion": "6.20.51",
-                        "androidSdkVersion": 33,
-                        "osName": "Android",
-                        "osVersion": "13",
-                    }
-                },
-                "query": query
-            }
-            res = cffi_requests.post(api_url, json=payload, headers=headers, impersonate="chrome120", timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                results = []
-                contents = data.get("contents", {}).get("tabbedSearchResultsRenderer", {}).get("tabs", [{}])[0].get("tabRenderer", {}).get("content", {}).get("sectionListRenderer", {}).get("contents", [])
-                for section in contents:
-                    if "musicShelfRenderer" in section:
-                        items = section["musicShelfRenderer"].get("contents", [])
-                        for item in items:
-                            if "musicResponsiveListItemRenderer" in item:
-                                info = item["musicResponsiveListItemRenderer"]
-                                columns = info.get("flexColumns", [])
-                                if len(columns) > 0:
-                                    first_col = columns[0].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [{}])[0]
-                                    name = first_col.get("text", "Desconhecido")
-                                    video_id = first_col.get("navigationEndpoint", {}).get("watchEndpoint", {}).get("videoId")
-                                    if video_id:
-                                        uploader = "YouTube Music"
-                                        if len(columns) > 1:
-                                            second_col_runs = columns[1].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [])
-                                            if second_col_runs:
-                                                uploader = "".join([r.get("text", "") for r in second_col_runs])
-                                        
-                                        thumbnail = f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
-                                        thumbnails = info.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
-                                        if thumbnails:
-                                            thumbnail = thumbnails[-1].get("url", thumbnail)
-                                            
-                                        results.append({
-                                            "id": video_id,
-                                            "title": name,
-                                            "uploader": uploader,
-                                            "duration_string": "",
-                                            "url": f"https://music.youtube.com/watch?v={video_id}",
-                                            "thumbnail": thumbnail,
-                                            "view_count": 0
-                                        })
-                                        if len(results) >= request.limit:
-                                            break
-                        if len(results) >= request.limit:
-                            break
-                if results:
-                    return {"results": results}
-        except Exception as e:
-            print(f"YT Music search failed: {e}. Falling back to yt-dlp.")
-
-    ydl_opts = {
-        'quiet': True,
-        'extract_flat': True,
-        'cookiefile': get_cookies_path()
-    }
-    query_str = f"ytsearch{request.limit}:{query}"
-    
-    def perform_search(opts):
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(query_str, download=False)
-            if 'entries' in info:
-                results = []
-                for entry in info['entries']:
-                    if entry:
-                        dur = entry.get('duration')
-                        dur_str = f"{int(dur)//60}:{int(dur)%60:02d}" if dur else ""
-                        results.append({
-                            "id": entry.get('id'),
-                            "title": entry.get('title'),
-                            "uploader": entry.get('uploader'),
-                            "duration_string": dur_str,
-                            "url": entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}",
-                            "thumbnail": entry.get('thumbnail') or f"https://i.ytimg.com/vi/{entry.get('id')}/mqdefault.jpg",
-                            "view_count": entry.get('view_count', 0)
-                        })
-                return {"results": results}
-            return {"results": []}
-
-    try:
-        return perform_search(ydl_opts)
-    except Exception as e:
-        error_msg = str(e)
-        if "does not look like a Netscape format cookies file" in error_msg or "cookie" in error_msg.lower():
-            print(f"Cookie error in search, falling back without cookies: {error_msg}")
-            ydl_opts.pop('cookiefile', None)
-            try:
-                return perform_search(ydl_opts)
-            except Exception as e2:
-                print(f"Fallback search error: {e2}")
-                raise HTTPException(status_code=500, detail=str(e2))
-        else:
-            print(f"Search error: {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
 
 import functools
 
@@ -725,212 +592,11 @@ def clean_url(url: str) -> str:
     except:
         return url
 
-@app.post("/info")
-async def get_info(request: DownloadRequest):
-    try:
-        url = clean_url(request.url)
-        url, pseudo_playlist, is_magic, magic_source, magic_cover = await asyncio.to_thread(parse_magic_url, url)
 
-        if pseudo_playlist:
-            info = pseudo_playlist
-            is_playlist = True
-            is_magic = True
-        else:
-            # Prevent falling back to yt-dlp for raw Spotify/Apple Music URLs if magic parser failed
-            if any(domain in url for domain in ['spotify.com', 'music.apple.com', 'deezer.com']) and not url.startswith('ytsearch'):
-                raise HTTPException(status_code=400, detail="Não foi possível extrair dados deste serviço (verifique se a playlist é privada ou tente novamente mais tarde).")
-                
-            ydl_opts = {
-                'quiet': True,
-                'nocheckcertificate': True,
-                'extract_flat': 'in_playlist',
-                'cookiefile': get_cookies_path(),
-                'writesubtitles': True,
-                'writeautomaticsub': True
-            }
-            
-            info = None
-            last_err = None
-            for client in ['android_vr', 'tv_embedded', 'web_embedded', 'ios_music', 'android_music', 'tv', 'web', 'web_creator']:
-                try:
-                    if client != 'web': ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                    break
-                except Exception as e: 
-                    last_err = str(e)
-                    if "does not look like a Netscape format cookies file" in last_err or "cookie" in last_err.lower():
-                        if 'cookiefile' in ydl_opts:
-                            print(f"Cookie error in get_info, retrying without cookies: {last_err}")
-                            ydl_opts.pop('cookiefile', None)
-                            try:
-                                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                                    info = ydl2.extract_info(url, download=False)
-                                break
-                            except Exception as e2:
-                                last_err = str(e2)
-                
-            if not info: 
-                err_msg = "Falha ao extrair info."
-                if last_err: err_msg += f" Detalhes: {last_err}"
-                raise HTTPException(status_code=500, detail=err_msg)
-                
-            if is_magic and not pseudo_playlist and 'entries' in info:
-                if len(info['entries']) > 0:
-                    info = info['entries'][0]
-                else:
-                    raise HTTPException(status_code=404, detail="Música não encontrada")
-                
-            is_playlist = ('entries' in info or info.get('playlist_id')) and (not is_magic or pseudo_playlist is not None) 
-        
-        duration_str = info.get('duration_string')
-        if not duration_str and info.get('duration'):
-            import datetime
-            duration_str = str(datetime.timedelta(seconds=info['duration']))
-            if duration_str.startswith('0:'): duration_str = duration_str[2:] 
 
-        resolutions = []
-        if not is_magic:
-            if is_playlist:
-                resolutions = [2160, 1440, 1080, 720, 480, 360, 240, 144]
-            else:
-                formats = info.get('formats', [])
-                res_set = set()
-                for f in formats:
-                    if f.get('vcodec') != 'none' and f.get('height'): res_set.add(f['height'])
-                resolutions = sorted(list(res_set), reverse=True)
 
-        subs_list = []
-        if info.get('subtitles'):
-            for lang in info['subtitles'].keys():
-                subs_list.append({"code": lang, "name": f"{lang.upper()}", "is_auto": False})
-        if info.get('automatic_captions'):
-            for lang in info['automatic_captions'].keys():
-                if not any(s['code'] == lang for s in subs_list):
-                    subs_list.append({"code": lang, "name": f"{lang.upper()} (Auto)", "is_auto": True})
 
-        return {
-            "status": "success",
-            "title": info['entries'][0].get('title') if ('entries' in info and 'v=' in request.url) else info.get('title'),
-            "thumbnail": magic_cover or info.get('thumbnail'),
-            "url": info.get('webpage_url', request.url),
-            "resolutions": resolutions,
-            "subtitles": subs_list,
-            "is_playlist": is_playlist,
-            "duration": info.get('duration'),
-            "duration_string": duration_str,
-            "magic_source": magic_source
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/playlist/details")
-def get_playlist_details(request: InfoRequest):
-    try:
-        url, pseudo_playlist, is_magic, magic_source, magic_cover = parse_magic_url(request.url)
-        
-        if pseudo_playlist:
-            playlist_info = pseudo_playlist
-        else:
-            ydl_opts = {
-                'quiet': True,
-                'nocheckcertificate': True,
-                'ignoreerrors': True,
-                'extract_flat': 'in_playlist',
-                'cookiefile': get_cookies_path(),
-                'js_runtimes': {'node': {}},
-                'remote_components': ['ejs:github']
-            }
-            if request.limit > 0: ydl_opts['playlistend'] = request.limit
-            
-            playlist_info = None
-            for client in ['web_embedded', 'tv_embedded', 'web', 'android']:
-                try:
-                    if client != 'web': ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        playlist_info = ydl.extract_info(url, download=False)
-                    break
-                except Exception as e:
-                    err_str = str(e)
-                    if "does not look like a Netscape format cookies file" in err_str or "cookie" in err_str.lower():
-                        if 'cookiefile' in ydl_opts:
-                            print(f"Cookie error in playlist details, retrying without cookies: {err_str}")
-                            ydl_opts.pop('cookiefile', None)
-                            try:
-                                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                                    playlist_info = ydl2.extract_info(url, download=False)
-                                break
-                            except Exception: pass
-                    pass
-            
-        if not playlist_info or 'entries' not in playlist_info:
-            raise HTTPException(status_code=400, detail="URL não é uma playlist ou falhou")
-            
-        playlist_id = playlist_info.get('id', '')
-        downloaded_ids = set(get_downloaded_ids(playlist_id)) if playlist_id else set()
-        
-        videos = []
-        for idx, entry in enumerate(playlist_info['entries']):
-            if entry is None: continue
-            entry_id = entry.get('id', '')
-            videos.append({
-                "index": idx,
-                "id": entry_id,
-                "title": entry.get('title', 'Sem título'),
-                "thumbnail": entry.get('thumbnail') or entry.get('thumbnails', [{}])[0].get('url'),
-                "duration": entry.get('duration', 0),
-                "uploader": entry.get('uploader', entry.get('channel', 'Desconhecido')),
-                "url": entry.get('url') or entry.get('webpage_url') or f"https://www.youtube.com/watch?v={entry_id}",
-                "status": 'downloaded' if entry_id in downloaded_ids else 'pending',
-                "playlistIdRef": playlist_id
-            })
-            
-        return {
-            "status": "success",
-            "playlist_id": playlist_id,
-            "title": playlist_info.get('title', 'Playlist'),
-            "total_videos": len(videos),
-            "videos": videos,
-            "magic_source": magic_source
-        }
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/download/retry")
-async def retry_download(req: RetryRequest):
-    rec = get_download_record(req.playlist_id, req.video_id)
-    if not rec: raise HTTPException(status_code=404, detail="Não encontrado no histórico")
-    mark_missing_db(req.playlist_id, req.video_id)
-    url = rec.get("url") or f"https://www.youtube.com/watch?v={rec['video_id']}"
-    
-    dreq = DownloadRequest(url=url, playlist_id=req.playlist_id, video_id=req.video_id, title=rec.get("title"))
-    job_id = str(uuid.uuid4())
-    jobs[job_id] = JobState(id=job_id, status="queued", progress=0.0, created_at=time.time(), title=rec.get("title"))
-    await download_queue.put((job_id, dreq))
-    return {"status": "ok", "job_id": job_id}
-
-@app.post("/download/enqueue")
-@app.post("/download")
-async def enqueue_download(req: DownloadRequest):
-    req.url = clean_url(req.url)
-    job_id = str(uuid.uuid4())
-    jobs[job_id] = JobState(id=job_id, status="queued", progress=0.0, created_at=time.time(), title=req.title)
-    await download_queue.put((job_id, req))
-    return {"job_id": job_id}
-
-@app.post("/download/cancel/{job_id}")
-async def cancel_download(job_id: str):
-    if job_id in jobs:
-        jobs[job_id].status = "cancelled"
-        jobs[job_id].error = "Cancelado pelo usuário"
-        return {"job_id": job_id, "status": "cancelled"}
-    raise HTTPException(status_code=404, detail="Job not found")
-
-@app.get("/download/status/{job_id}")
-async def get_download_status(job_id: str):
-    st = jobs.get(job_id)
-    if not st: raise HTTPException(status_code=404, detail="Not found")
-    return asdict(st)
 
 @app.post("/open_folder")
 def open_folder():
@@ -1036,142 +702,13 @@ def get_terms_content():
         with open(path, "r", encoding="utf-8") as f: return {"content": f.read()}
     return {"content": "Termos de Uso Padrão"}
 
-@app.get("/api/settings/concurrent_downloads")
-def get_concurrent_downloads():
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM app_settings WHERE key = 'concurrent_downloads'")
-        row = cur.fetchone()
-        conn.close()
-        return {"value": int(row['value']) if row else 2}
-    except:
-        return {"value": 2}
 
-@app.post("/api/settings/concurrent_downloads")
-def set_concurrent_downloads(body: dict):
-    import downloader
-    try:
-        value = max(1, min(8, int(body.get("value", 2))))
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('concurrent_downloads', ?)", (str(value),))
-        conn.commit()
-        conn.close()
-        # Update the live semaphore so it takes effect immediately without restart
-        downloader.download_sem = asyncio.Semaphore(value)
-        print(f"[Settings] Concurrent downloads updated to {value}")
-        return {"status": "ok", "value": value}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/settings/start_minimized")
-def get_start_minimized():
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM app_settings WHERE key = 'start_minimized'")
-        row = cur.fetchone()
-        conn.close()
-        return {"value": row[0] == 'true' if row else False}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/settings/start_minimized")
-def set_start_minimized(body: dict):
-    value = body.get('value', False)
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        val_str = 'true' if value else 'false'
-        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('start_minimized', ?)", (val_str,))
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "value": value}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/settings/miniplayer_hotkey")
-def get_miniplayer_hotkey():
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM app_settings WHERE key = 'miniplayer_hotkey'")
-        row = cur.fetchone()
-        conn.close()
-        return {"hotkey": row[0] if row and row[0] else "ctrl+shift+m"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/settings/miniplayer_hotkey")
-def set_miniplayer_hotkey(body: dict):
-    global current_miniplayer_hotkey
-    new_hotkey = body.get('hotkey', 'ctrl+shift+m').lower()
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('miniplayer_hotkey', ?)", (new_hotkey,))
-        conn.commit()
-        conn.close()
-        
-        try:
-            import keyboard
-            keyboard.remove_hotkey(current_miniplayer_hotkey)
-        except Exception as e:
-            print(f"[Settings] Erro ao remover atalho antigo: {e}")
-            
-        current_miniplayer_hotkey = new_hotkey
-        
-        try:
-            import keyboard
-            keyboard.add_hotkey(current_miniplayer_hotkey, toggle_miniplayer)
-            print(f"[Settings] Novo atalho do Mini Player registrado: {current_miniplayer_hotkey}")
-        except Exception as e:
-            print(f"[Settings] Erro ao adicionar novo atalho: {e}")
-            
-        return {"status": "ok", "hotkey": new_hotkey}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/settings/download_folder")
-def get_download_folder():
-    from utils import get_downloads_dir
-    return {"folder": get_downloads_dir()}
 
-@app.post("/api/settings/choose_folder")
-def choose_folder():
-    import threading
-    result_folder = {"folder": ""}
-    
-    def open_dialog():
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            folder = filedialog.askdirectory(parent=root, title="Selecione a Pasta de Downloads")
-            root.destroy()
-            result_folder["folder"] = folder
-        except Exception:
-            pass
-            
-    try:
-        t = threading.Thread(target=open_dialog)
-        t.start()
-        t.join()
-        
-        folder = result_folder["folder"]
-        if folder:
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('download_folder', ?)", (folder,))
-            conn.commit()
-            conn.close()
-            return {"status": "ok", "folder": folder}
-        return {"status": "error", "message": "Nenhuma ação realizada ou cancelada pelo usuário."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 @app.post("/api/choose_file")
 def choose_file():
@@ -1435,11 +972,6 @@ import re
 studio_jobs = {}
 studio_install_jobs = {}
 
-class StudioSplitRequest(BaseModel):
-    file_path: str
-    quality: str = "fast"
-    model: str = "htdemucs_ft"
-    two_stems: bool = True
 
 def is_python_installed():
     import subprocess
@@ -1450,316 +982,16 @@ def is_python_installed():
     except Exception:
         return False
     
-async def run_demucs_job(job_id: str, file_path: str, quality: str, model: str, two_stems: bool):
-    try:
-        from utils import get_downloads_dir, get_studio_dir
-        import subprocess
-        
-        abs_path = os.path.join(get_downloads_dir(), file_path)
-        if not os.path.exists(abs_path):
-            studio_jobs[job_id].update({"status": "error", "message": "Arquivo original não encontrado.", "progress": 0})
-            return
-            
-        studio_dir = get_studio_dir()
-        CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-        
-        overlap = '0.25'
-        shifts = '0'
-        if quality == 'balanced':
-            overlap = '0.50'
-        elif quality == 'studio':
-            overlap = '0.75'
-            shifts = '2' # Aumentado de 1 para 2
-        elif quality == 'ultra':
-            overlap = '0.99'
-            shifts = '4' # Aumentado de 2 para 4 para maior redução de ruído
 
-        if getattr(sys, 'frozen', False):
-            # PyInstaller mode: Lumina.exe --run-demucs ...
-            cmd_args = [sys.executable, '--run-demucs']
-        else:
-            # Source mode: python main.py --run-demucs ...
-            main_script = os.path.abspath(sys.argv[0])
-            cmd_args = [sys.executable, main_script, '--run-demucs']
 
-        cmd_args.extend([
-            abs_path, '-n', model, 
-            '--overlap', overlap, 
-            '-o', studio_dir, '--mp3', '--mp3-bitrate', '320'
-        ])
-        
-        if two_stems:
-            cmd_args.extend(['--two-stems', 'vocals'])
 
-        if shifts != '0':
-            cmd_args.extend(['--shifts', shifts])
 
-        print(f"[\033[94mIA Studio\033[0m] Executando comando IA: {' '.join(cmd_args)}")
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=CREATE_NO_WINDOW
-            )
-        except FileNotFoundError:
-            python_installed = is_python_installed()
-            print("[\033[31mIA Studio\033[0m] ERRO: Demucs não encontrado no sistema.")
-            studio_jobs[job_id].update({
-                "status": "error", 
-                "message": "Motor de IA (Demucs) não encontrado neste PC.", 
-                "progress": 0,
-                "demucs_missing": True,
-                "python_missing": not python_installed
-            })
-            return
-            
-        print(f"[\033[94mIA Studio\033[0m] Iniciando separação para: {os.path.basename(abs_path)}")
-        
-        last_log_progress = -1
-        buffer = ""
-        while True:
-            chunk = await process.stderr.read(1024)
-            if not chunk:
-                break
-            text = chunk.decode(errors='replace')
-            buffer += text
-            
-            # Keep buffer size in check
-            if len(buffer) > 2048:
-                buffer = buffer[-2048:]
-            
-            # Extract progress
-            match_pct = re.findall(r'(\d+)%\|', buffer)
-            if match_pct:
-                progress = int(match_pct[-1])
-                studio_jobs[job_id]["progress"] = progress
-                studio_jobs[job_id]["status"] = "processing"
-                
-                # Check for elapsed time, ETA and speed in the buffer
-                last_idx = buffer.rfind(f"{progress}%|")
-                if last_idx != -1:
-                    sub = buffer[last_idx:]
-                    match_time = re.search(r'\[(\d+:\d+(?::\d+)?)\s*<\s*(\d+:\d+(?::\d+)?)\s*,\s*([^\]]+)\]', sub)
-                    if match_time:
-                        elapsed = match_time.group(1)
-                        eta = match_time.group(2)
-                        speed = match_time.group(3).strip()
-                        
-                        studio_jobs[job_id]["elapsed"] = elapsed
-                        studio_jobs[job_id]["eta"] = eta
-                        studio_jobs[job_id]["speed"] = speed
-                        studio_jobs[job_id]["message"] = f"Separando faixas: {progress}% (Restante: {eta} @ {speed})"
-                    else:
-                        studio_jobs[job_id]["message"] = f"Separando faixas: {progress}%"
-                else:
-                    studio_jobs[job_id]["message"] = f"Separando faixas: {progress}%"
-                
-                if progress % 10 == 0 and progress != last_log_progress:
-                    print(f"[\033[94mIA Studio\033[0m] Extraindo canais: {progress}%")
-                    last_log_progress = progress
-                
-        await process.wait()
-        
-        if process.returncode != 0:
-            print(f"[\033[31mIA Studio\033[0m] ERRO na separação: Código {process.returncode}")
-            studio_jobs[job_id].update({"status": "error", "message": "Falha na separação da música.", "progress": 0})
-        else:
-            print(f"[\033[32mIA Studio\033[0m] SUCESSO! Separação concluída e salva na pasta Studio.")
-            studio_jobs[job_id].update({"status": "success", "message": "Música separada por IA com sucesso!", "output_dir": studio_dir, "progress": 100})
-            
-    except Exception as e:
-        print(f"[\033[31mIA Studio\033[0m] EXCEPTION: {e}")
-        studio_jobs[job_id].update({"status": "error", "message": str(e), "progress": 0})
 
-@app.post("/api/studio/split")
-async def studio_split(request: StudioSplitRequest, background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    studio_jobs[job_id] = {
-        "status": "starting",
-        "progress": 0,
-        "message": "Inicializando IA...",
-        "file_path": request.file_path,
-        "quality": request.quality,
-        "model": request.model,
-        "two_stems": request.two_stems,
-        "eta": "",
-        "speed": "",
-        "elapsed": ""
-    }
-    background_tasks.add_task(run_demucs_job, job_id, request.file_path, request.quality, request.model, request.two_stems)
-    return {"job_id": job_id}
 
-@app.get("/api/studio/jobs")
-def get_studio_all_jobs():
-    return studio_jobs
 
-@app.get("/api/studio/status/{job_id}")
-def get_studio_status(job_id: str):
-    if job_id not in studio_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return studio_jobs[job_id]
 
-def install_ai_worker(job_id: str):
-    try:
-        import urllib.request
-        import subprocess
-        from utils import get_data_dir
-        
-        studio_jobs[job_id] = {"status": "processing", "progress": 10, "message": "Baixando Python (30 MB)..."}
-        data_dir = get_data_dir()
-        installer_path = os.path.join(data_dir, "python_installer.exe")
-        
-        # Download Python if not present
-        if not os.path.exists(installer_path):
-            urllib.request.urlretrieve("https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe", installer_path)
-            
-        studio_jobs[job_id] = {"status": "processing", "progress": 30, "message": "Instalando Python no sistema..."}
-        
-        # Install Python silently
-        subprocess.run([installer_path, "/passive", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"], check=True)
-        
-        studio_jobs[job_id] = {"status": "processing", "progress": 50, "message": "Instalando Motor de IA (Download de 2.5 GB, aguarde)..."}
-        
-        # Find Python executable
-        local_app_data = os.environ.get('LOCALAPPDATA', '')
-        python_exe = os.path.join(local_app_data, "Programs", "Python", "Python310", "python.exe")
-        if not os.path.exists(python_exe):
-            python_exe = "python" # fallback to path
-            
-        subprocess.run([python_exe, "-m", "pip", "install", "demucs"], check=True)
-        
-        studio_jobs[job_id] = {"status": "success", "progress": 100, "message": "Inteligência Artificial instalada com sucesso!"}
-    except Exception as e:
-        print(f"Erro na instalacao da IA: {e}")
-        studio_jobs[job_id] = {"status": "error", "progress": 0, "message": f"Falha na instalação: {str(e)}"}
 
-@app.post("/api/studio/install")
-async def studio_install(background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    studio_jobs[job_id] = {"status": "starting", "progress": 0, "message": "Iniciando instalação..."}
-    background_tasks.add_task(install_ai_worker, job_id)
-    return {"job_id": job_id}
-
-async def run_install_full(job_id: str):
-    import subprocess
-    import asyncio
-    import urllib.request
-    from utils import get_downloads_dir
-    
-    CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-    studio_install_jobs[job_id] = {"status": "processing", "message": "Baixando instalador do Python 3.10..."}
-    
-    installer_path = os.path.join(get_downloads_dir(), "python_installer.exe")
-    url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe"
-    try:
-        urllib.request.urlretrieve(url, installer_path)
-    except Exception as e:
-        studio_install_jobs[job_id] = {"status": "error", "message": f"Erro ao baixar Python: {e}"}
-        return
-
-    studio_install_jobs[job_id]["message"] = "Instalando Python silenciosamente na pasta local...\nIsso não requer permissão de administrador."
-    cmd_install = [installer_path, '/quiet', 'InstallAllUsers=0', 'PrependPath=1', 'Include_test=0']
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd_install, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=CREATE_NO_WINDOW
-        )
-        await proc.wait()
-        if proc.returncode != 0:
-            studio_install_jobs[job_id] = {"status": "error", "message": f"Falha ao instalar o Python. Código: {proc.returncode}"}
-            return
-    except Exception as e:
-        studio_install_jobs[job_id] = {"status": "error", "message": f"Erro fatal ao instalar Python: {e}"}
-        return
-
-    studio_install_jobs[job_id]["message"] = "Python instalado com sucesso!\n\nIniciando download do Motor de IA (Demucs) (~2GB)..."
-    
-    # Python is installed in %LocalAppData%\Programs\Python\Python310\python.exe
-    python_exe = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python310', 'python.exe')
-    if not os.path.exists(python_exe):
-        # Fallback to general 'python' just in case
-        python_exe = "python"
-        
-    cmd_pip = [python_exe, '-m', 'pip', 'install', 'demucs']
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd_pip,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            creationflags=CREATE_NO_WINDOW,
-        )
-    except FileNotFoundError:
-        studio_install_jobs[job_id] = {"status": "error", "message": "Executável do Python não encontrado após instalação!"}
-        return
-        
-    while True:
-        line = await process.stdout.readline()
-        if not line:
-            break
-        text = line.decode(errors='replace').strip()
-        if text:
-            studio_install_jobs[job_id]["message"] = text
-    
-    await process.wait()
-    if process.returncode == 0:
-        studio_install_jobs[job_id]["status"] = "success"
-        studio_install_jobs[job_id]["message"] = "Inteligência Artificial instalada com sucesso!"
-    else:
-        studio_install_jobs[job_id]["status"] = "error"
-        studio_install_jobs[job_id]["message"] = f"Erro na instalação da IA (código {process.returncode})."
-
-@app.post("/api/studio/install_full")
-async def studio_install_full(background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    studio_install_jobs[job_id] = {"status": "processing", "message": "Iniciando processo automatizado..."}
-    background_tasks.add_task(run_install_full, job_id)
-    return {"job_id": job_id}
-
-async def run_install_demucs(job_id: str):
-    import subprocess
-    import asyncio
-    CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-    cmd_args = ['python', '-m', 'pip', 'install', 'demucs']
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            creationflags=CREATE_NO_WINDOW
-        )
-    except FileNotFoundError:
-        studio_install_jobs[job_id] = {"status": "error", "message": "O Python não está instalado neste computador! Instale o Python primeiro."}
-        return
-        
-    while True:
-        line = await process.stdout.readline()
-        if not line:
-            break
-        text = line.decode(errors='replace').strip()
-        if text:
-            studio_install_jobs[job_id]["message"] = text
-    
-    await process.wait()
-    if process.returncode == 0:
-        studio_install_jobs[job_id]["status"] = "success"
-        studio_install_jobs[job_id]["message"] = "Inteligência Artificial instalada com sucesso!"
-    else:
-        studio_install_jobs[job_id]["status"] = "error"
-        studio_install_jobs[job_id]["message"] = f"Erro na instalação (código {process.returncode})."
-
-@app.post("/api/studio/install")
-async def studio_install(background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    studio_install_jobs[job_id] = {"status": "processing", "message": "Iniciando instalação do Demucs..."}
-    background_tasks.add_task(run_install_demucs, job_id)
-    return {"job_id": job_id}
-
-@app.get("/api/studio/install/status/{job_id}")
-def get_studio_install_status(job_id: str):
-    if job_id not in studio_install_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return studio_install_jobs[job_id]
 
 class ConvertRequest(BaseModel):
     input_path: str

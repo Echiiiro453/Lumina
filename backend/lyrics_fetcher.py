@@ -68,6 +68,44 @@ def _build_search_query(title: str, artist: str) -> str:
     
     return clean
 
+def _fetch_from_musixmatch_custom(search_term: str) -> str:
+    """
+    Falsifica a assinatura do aplicativo Desktop Oficial do Musixmatch para 
+    gerar um token inviolavel e buscar a letra em milissegundos sem erro 401.
+    """
+    import time
+    from curl_cffi import requests
+    from config import CHROME_IMPERSONATE
+    
+    try:
+        t_millis = int(time.time() * 1000)
+        url_token = f"https://apic-desktop.musixmatch.com/ws/1.1/token.get?user_language=en&app_id=web-desktop-app-v1.0&t={t_millis}"
+        res_token = requests.get(url_token, impersonate=CHROME_IMPERSONATE, timeout=10)
+        data = res_token.json()
+        
+        if data['message']['header']['status_code'] == 200:
+            token = data['message']['body']['user_token']
+            
+            import urllib.parse
+            url_search = f"https://apic-desktop.musixmatch.com/ws/1.1/track.search?q={urllib.parse.quote(search_term)}&page_size=1&page=1&app_id=web-desktop-app-v1.0&usertoken={token}&t={t_millis}"
+            res_search = requests.get(url_search, impersonate=CHROME_IMPERSONATE, timeout=10)
+            search_data = res_search.json()
+            
+            if search_data['message']['header']['status_code'] == 200:
+                track_list = search_data['message']['body']['track_list']
+                if track_list:
+                    track_id = track_list[0]['track']['track_id']
+                    
+                    url_sync = f"https://apic-desktop.musixmatch.com/ws/1.1/track.subtitle.get?track_id={track_id}&subtitle_format=lrc&app_id=web-desktop-app-v1.0&usertoken={token}&t={t_millis}"
+                    res_sync = requests.get(url_sync, impersonate=CHROME_IMPERSONATE, timeout=10)
+                    sync_data = res_sync.json()
+                    
+                    if sync_data['message']['header']['status_code'] == 200:
+                        return sync_data['message']['body']['subtitle']['subtitle_body']
+    except Exception as e:
+        print(f"  [lyrics:warn] Musixmatch custom engine falhou: {e}")
+        
+    return None
 
 def fetch_and_embed_lyrics(file_path: str, title: str, artist: str = '') -> bool:
     """
@@ -90,18 +128,25 @@ def fetch_and_embed_lyrics(file_path: str, title: str, artist: str = '') -> bool
     search_query = _build_search_query(title, artist)
     print(f"  [lyrics] Buscando letra: '{search_query}'")
 
-    # Lrclib only: open-source, no auth, no rate-limit, thread-safe.
-    # Musixmatch removed: causes 401 spam after ~10 requests, not thread-safe.
-    providers = ["Lrclib"]
-
     lyrics_text = None
 
-    try:
-        lyrics_text = syncedlyrics.search(search_query, providers=providers)
-        if lyrics_text:
-            print(f"  [lyrics] Letra sincronizada encontrada!")
-    except Exception:
-        pass
+    # 1. Tenta o nosso motor customizado imune a 401
+    print(f"  [lyrics] Tentando motor silencioso Musixmatch VIP...")
+    lyrics_text = _fetch_from_musixmatch_custom(search_query)
+    if lyrics_text:
+        print(f"  [lyrics] Letra sincronizada encontrada pelo motor Musixmatch VIP!")
+    else:
+        print(f"  [lyrics] Musixmatch bloqueou o acesso. Acionando Fallbacks Asiáticos...")
+
+    # 2. Fallback para Biblioteca de Terceiros (Asia + Lrclib)
+    if not lyrics_text:
+        providers = ["Lrclib", "NetEase", "Megalobiz", "Kugou"]
+        try:
+            lyrics_text = syncedlyrics.search(search_query, providers=providers)
+            if lyrics_text:
+                print(f"  [lyrics] Letra sincronizada encontrada (Asia/Lrclib)!")
+        except Exception:
+            pass
 
     if not lyrics_text:
         try:
@@ -111,9 +156,9 @@ def fetch_and_embed_lyrics(file_path: str, title: str, artist: str = '') -> bool
         except Exception:
             pass
 
-    # FALLBACK: Se o LRCLIB falhar, nós usamos nosso raspador "hacker" do Genius!
+    # 3. FALLBACK: Raspador Genius!
     if not lyrics_text:
-        print(f"  [lyrics] LRCLIB falhou. Acionando o raspador do Genius para: '{search_query}'")
+        print(f"  [lyrics] Todos falharam. Acionando raspador do Genius para: '{search_query}'")
         try:
             from curl_cffi import requests as curl_req
             from bs4 import BeautifulSoup

@@ -130,12 +130,12 @@ def parse_spotify(url: str):
         import json
         import os
         
-        target = os.path.abspath(sys.argv[0])
-        cmd = [sys.executable]
-        if not getattr(sys, 'frozen', False) and target.endswith('.py'):
-            cmd.append(target)
-            
-        cmd.extend(["--run-spotify", url_type, item_id])
+        cmd = []
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable, "--run-spotify", url_type, item_id]
+        else:
+            main_script = os.path.join(os.path.dirname(__file__), "main.py")
+            cmd = [sys.executable, main_script, "--run-spotify", url_type, item_id]
         
         CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW, text=True, timeout=120)

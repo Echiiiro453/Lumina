@@ -2,23 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lumina</title>
-    <script>
-      window.onerror = function(msg, url, line, col, error) {
-        var div = document.createElement("div");
-        div.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:black; color:#ff5555; z-index:99999; padding:20px; font-family:monospace; white-space:pre-wrap; overflow:auto;";
-        div.innerHTML = "<h1>⚠️ Erro de Inicialização</h1><h3>" + msg + "</h3><p><strong>Arquivo:</strong> " + url + ":" + line + "</p><pre>" + (error ? error.stack : 'Sem stacktrace') + "</pre>";
-        document.body.appendChild(div);
-      };
-      window.onunhandledrejection = function(event) {
-         var div = document.createElement("div");
-        div.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:black; color:#ff5555; z-index:99999; padding:20px; font-family:monospace; white-space:pre-wrap; overflow:auto;";
-        div.innerHTML = "<h1>⚠️ Erro de Promessa (Async)</h1><h3>" + event.reason + "</h3>";
-        document.body.appendChild(div);
-      };
-    </script>
+    <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+
     </head>
   <body>
     <div id="root"></div>

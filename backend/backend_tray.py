@@ -105,7 +105,10 @@ def wait_and_load(window):
     for _ in range(60):
         try:
             with socket.create_connection(("127.0.0.1", 8000), timeout=1):
-                window.load_url('http://127.0.0.1:8000')
+                # Pequena pausa para garantir que o WebView2 terminou de renderizar o HTML de loading
+                # antes de fazer load_url — evita a tela preta em PCs rápidos
+                time.sleep(1.5)
+                window.load_url(f'http://127.0.0.1:8000/?t={int(time.time())}')
                 return
         except OSError:
             time.sleep(0.5)
@@ -128,9 +131,13 @@ def create_tray_icon(window):
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
             
-        icon_path = os.path.join(base_path, 'static', 'favicon.ico')
-        if os.path.exists(icon_path):
-            image = Image.open(icon_path)
+        icon_path_lumina = os.path.join(base_path, 'icon.ico')
+        icon_path_fallback = os.path.join(base_path, 'static', 'favicon.ico')
+        
+        if os.path.exists(icon_path_lumina):
+            image = Image.open(icon_path_lumina)
+        elif os.path.exists(icon_path_fallback):
+            image = Image.open(icon_path_fallback)
     except:
         pass
 
@@ -143,11 +150,11 @@ def create_tray_icon(window):
         os._exit(0)
 
     menu = pystray.Menu(
-        pystray.MenuItem("Mostrar AppMusica", show_window, default=True),
+        pystray.MenuItem("Mostrar Lumina", show_window, default=True),
         pystray.MenuItem("Sair", exit_app)
     )
     
-    icon = pystray.Icon("appmusica", image, "AppMusica", menu)
+    icon = pystray.Icon("lumina", image, "Lumina", menu)
     
     # Executa o ícone na thread atual (que não é a principal do webview, mas do tray)
     icon.run()
@@ -161,13 +168,18 @@ def start_desktop():
     
     loading_html = '''
     <body style="background-color:#09090b;color:white;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0;">
-        <h2>Iniciando AppMusica...</h2>
-        <p style="color:#a855f7;">Carregando componentes do servidor</p>
+        <h2 style="margin:0;font-size:2rem;font-weight:700;">Lumina</h2>
+        <p style="color:#a855f7;margin-top:12px;">Inicializando servidor...</p>
+        <div style="width:200px;height:3px;background:#1e1e1e;border-radius:99px;margin-top:24px;overflow:hidden;">
+          <div style="width:40%;height:100%;background:linear-gradient(90deg,#a855f7,#6366f1);border-radius:99px;animation:bar 1.2s ease-in-out infinite alternate;">
+          </div>
+        </div>
+        <style>@keyframes bar{from{margin-left:0}to{margin-left:60%}}</style>
     </body>
     '''
     
     window = webview.create_window(
-        'Music Downloader', 
+        'Lumina', 
         html=loading_html, 
         width=1100, 
         height=800,

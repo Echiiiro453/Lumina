@@ -57,7 +57,7 @@ export function ConverterModal({ isOpen, onClose, apiUrl }) {
     } catch (e) {
       console.error(e);
       setStatus('error');
-      setMessage(e.response?.data?.detail || 'Erro desconhecido na conversão.');
+      setMessage(e.response?.data?.detail || (t('converterUnknownError') || 'Erro desconhecido na conversão.'));
     } finally {
       setIsConverting(false);
     }

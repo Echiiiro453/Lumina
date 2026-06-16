@@ -28,6 +28,7 @@ def main():
         ("static", "static"),
         ("../TERMS.md", "."),
         ("lyrics_fetcher.py", "."),
+        ("icon.ico", "."),
         ("C:/Users/andrey/AppData/Local/Programs/Python/Python310/Lib/site-packages/vosk", "vosk")
     ]
     

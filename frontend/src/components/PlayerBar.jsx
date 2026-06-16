@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { RippleButton } from './Ripple';
 import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
 
-export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle }) {
+export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
   const [isPlaying, setIsPlaying] = useState(false);
   
 
@@ -77,7 +77,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     
     let cover = '';
     if (metadata?.coverUrl) cover = metadata.coverUrl;
-    else if (currentSong.video_id) cover = `https://i.ytimg.com/vi/${currentSong.video_id}/mqdefault.jpg`;
+    else if (currentSong.video_id) cover = `https://i.ytimg.com/vi/${currentSong.video_id}/0.jpg`;
     else if (currentSong.thumbnails && currentSong.thumbnails.length > 0) cover = currentSong.thumbnails[0].url;
 
     fetch('http://localhost:8000/api/miniplayer/state', {
@@ -85,7 +85,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: currentSong.title || 'Música',
-        artist: currentSong.artist || currentSong.author || 'Desconhecido',
+        artist: currentSong.artist || currentSong.author || (t('playerUnknown') || 'Desconhecido'),
         cover_url: cover,
         isPlaying,
         progress,
@@ -115,6 +115,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   };
   
   const audioRef = useRef(null);
+  const scrobbledRef = useRef(false);
   
   const [artistPhoto, setArtistPhoto] = useState(null);
   const [showVisualizer, setShowVisualizer] = useState(false);
@@ -252,12 +253,29 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     setMetadata(null);
     setHasVideoTrack(false);
 
-    if (currentSong.file) {
-      const urlPath = currentSong.file.split(/[\\/]/).map(encodeURIComponent).join('/');
-      const baseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const baseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+
+    if (currentSong.isStream && currentSong.url) {
+      // ── Streaming mode: use the resolved audio URL directly ──
+      if (audioRef.current) {
+        audioRef.current.src = currentSong.url;
+        audioRef.current.volume = volume;
+        audioRef.current.play()
+          .then(() => setIsPlaying(true))
+          .catch(err => console.error('Stream playback error:', err));
+      }
+      // Set basic metadata from song object
+      setMetadata({
+        title: currentSong.title,
+        artist: currentSong.artist || '',
+        coverUrl: currentSong.thumbnail || '',
+      });
+    } else if (currentSong.file) {
+      const urlPath = currentSong.file.split(/[\\\/]/).map(encodeURIComponent).join('/');
       const url = `${baseUrl}/downloads/${urlPath}`;
       
       // Fetch embedded lyrics & cover from backend
+      scrobbledRef.current = false;
       fetch(`${baseUrl}/api/track_metadata?file_path=${encodeURIComponent(currentSong.file)}`)
         .then(res => res.json())
         .then(data => {
@@ -309,6 +327,26 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const dur = audioRef.current.duration;
       setProgress(curr);
       setDuration(dur || 0);
+
+      // Scrobble when 50% played
+      if (!scrobbledRef.current && dur > 30 && curr >= dur * 0.5) {
+        scrobbledRef.current = true;
+        try {
+          const fallbackArtist = currentSong.title?.includes(' - ') ? currentSong.title.split(' - ')[0].trim() : 'Unknown Artist';
+          const fallbackTitle = currentSong.title?.includes(' - ') ? currentSong.title.split(' - ')[1].trim() : currentSong.title;
+          
+          const artist = metadata?.artist || currentSong.artist || fallbackArtist;
+          const title = metadata?.title || fallbackTitle;
+          if (artist && title) {
+            fetch(`${window.location.protocol}//${window.location.hostname}:8000/api/scrobble`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artist, title })
+            }).catch(()=>{});
+          }
+        } catch(e) {}
+      }
+
 
       if (curr >= dur && dur > 0) {
         if (isLooping) {
@@ -465,7 +503,17 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
                 <div className="grid grid-cols-2 gap-3">
                   <div className="p-4 bg-surface-container-high rounded-2xl">
                     <span className="block text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-1">Artista</span>
-                    <span className="text-on-surface font-medium truncate block" title={metadata.artist || "Desconhecido"}>{metadata.artist || "Desconhecido"}</span>
+                    {onOpenArtist && metadata?.artist ? (
+                      <button
+                        onClick={() => onOpenArtist(metadata.artist)}
+                        className="text-on-surface font-medium truncate block hover:text-primary transition-colors text-left w-full"
+                        title={`Ver discografia de ${metadata.artist}`}
+                      >
+                        {metadata.artist} ↗
+                      </button>
+                    ) : (
+                      <span className="text-on-surface font-medium truncate block" title={metadata.artist || 'Desconhecido'}>{metadata.artist || 'Desconhecido'}</span>
+                    )}
                   </div>
                   <div className="p-4 bg-surface-container-high rounded-2xl">
                     <span className="block text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest mb-1">Álbum</span>
@@ -626,7 +674,18 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
                 )}
                 <div>
                   <h1 className="text-3xl md:text-4xl font-medium text-on-surface mb-2 tracking-tight">{currentSong.title}</h1>
-                  <p className="text-on-surface-variant/50 font-light text-sm tracking-widest uppercase">{metadata?.artist || currentSong.quality || "Local Audio"}</p>
+                  {onOpenArtist && (metadata?.artist || currentSong.artist) ? (
+                    <button
+                      onClick={() => onOpenArtist(metadata?.artist || currentSong.artist)}
+                      className="text-on-surface-variant/50 font-light text-sm tracking-widest uppercase hover:text-primary transition-colors group flex items-center gap-2 mx-auto"
+                      title={`Ver discografia de ${metadata?.artist || currentSong.artist}`}
+                    >
+                      {metadata?.artist || currentSong.quality || 'Local Audio'}
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold normal-case tracking-normal">ver mais</span>
+                    </button>
+                  ) : (
+                    <p className="text-on-surface-variant/50 font-light text-sm tracking-widest uppercase">{metadata?.artist || currentSong.quality || 'Local Audio'}</p>
+                  )}
                 </div>
                 
                 {hasVideoTrack && (

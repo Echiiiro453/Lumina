@@ -26,6 +26,8 @@ def init_db():
                 PRIMARY KEY (playlist_id, video_id)
             );
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_video_id ON downloads (video_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_title ON downloads (title);")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS app_settings (
                 key     TEXT PRIMARY KEY,
@@ -38,6 +40,14 @@ def init_db():
                 title      TEXT,
                 file_path  TEXT,
                 added_at   REAL
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs_queue (
+                job_id TEXT PRIMARY KEY,
+                request_json TEXT,
+                status TEXT,
+                created_at REAL
             );
         """)
         try:
@@ -192,23 +202,26 @@ def sync_db_with_disk(downloads_dir: str) -> dict:
     """
     Varre todos os registros 'downloaded' no banco e verifica se os arquivos ainda existem no disco.
     Arquivos deletados sao marcados como 'missing' automaticamente.
-    Retorna um resumo com { 'checked': N, 'marked_missing': N }.
+    Também escaneia a pasta de downloads e importa arquivos de áudio órfãos para o banco.
     """
     checked = 0
     marked_missing = 0
+    imported_local = 0
     try:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute("SELECT playlist_id, video_id, file_path FROM downloads WHERE status = 'downloaded';")
         rows = cur.fetchall()
         
+        db_files = set()
+        
+        # 1. Verifica arquivos que já estão no banco
         for row in rows:
             checked += 1
             file_path = row["file_path"]
             if not file_path:
                 continue
             
-            # Supports both absolute and relative paths
             abs_path = file_path if os.path.isabs(file_path) else os.path.join(downloads_dir, file_path)
             
             if not os.path.exists(abs_path):
@@ -217,16 +230,86 @@ def sync_db_with_disk(downloads_dir: str) -> dict:
                     (row["playlist_id"], row["video_id"])
                 )
                 marked_missing += 1
+            else:
+                db_files.add(os.path.basename(abs_path))
+        
+        # 2. Importa arquivos locais órfãos
+        import uuid
+        if os.path.exists(downloads_dir):
+            for root, dirs, files in os.walk(downloads_dir):
+                for file in files:
+                    if file.lower().endswith(('.mp3', '.m4a', '.wav', '.flac', '.ogg')):
+                        if file not in db_files:
+                            rel_path = os.path.relpath(os.path.join(root, file), downloads_dir)
+                            pseudo_id = "local_" + str(uuid.uuid4())[:8]
+                            title = os.path.splitext(file)[0]
+                            
+                            cur.execute("""
+                                INSERT OR REPLACE INTO downloads
+                                (playlist_id, video_id, title, file_path, status, created_at, url)
+                                VALUES (?, ?, ?, ?, 'downloaded', ?, ?);
+                            """, ('local_folder', pseudo_id, title, rel_path, time.time(), ''))
+                            imported_local += 1
+                            db_files.add(file)
         
         conn.commit()
         conn.close()
         
-        if marked_missing > 0:
-            print(f"[DB SYNC] Concluido: {checked} verificados, {marked_missing} arquivos ausentes marcados.")
-        else:
-            print(f"[DB SYNC] Concluido: {checked} verificados, tudo OK.")
+        msg = f"[DB SYNC] Concluido: {checked} verificados, {marked_missing} marcados ausentes, {imported_local} importados locais."
+        print(msg)
     except Exception as e:
         print(f"Erro no sync_db_with_disk: {e}")
     
-    return {"checked": checked, "marked_missing": marked_missing}
+    return {"checked": checked, "marked_missing": marked_missing, "imported_local": imported_local}
 
+
+def set_setting(key: str, value: str):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);", (key, value))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro ao salvar setting: {e}")
+
+def get_setting(key: str, default: str = None) -> str:
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM app_settings WHERE key = ?;", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row["value"] if row else default
+    except:
+        return default
+
+def add_job_to_queue(job_id: str, request_json: str):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO jobs_queue (job_id, request_json, status, created_at) VALUES (?, ?, 'pending', ?);", (job_id, request_json, time.time()))
+        conn.commit()
+        conn.close()
+    except Exception as e: print(f"Erro add_job: {e}")
+
+def remove_job_from_queue(job_id: str):
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM jobs_queue WHERE job_id = ?;", (job_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e: print(f"Erro remove_job: {e}")
+
+def get_pending_jobs_from_queue() -> list:
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT job_id, request_json FROM jobs_queue ORDER BY created_at ASC;")
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e: 
+        print(f"Erro get_jobs: {e}")
+        return []

@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Terminal } from 'lucide-react';
+import { X, Terminal, Copy, Check } from 'lucide-react';
 import axios from 'axios';
 
 export function LogViewerModal({ isOpen, onClose, apiUrl }) {
   const [logs, setLogs] = useState([]);
+  const [copied, setCopied] = useState(false);
   const logsEndRef = useRef(null);
 
   useEffect(() => {
@@ -35,6 +36,17 @@ export function LogViewerModal({ isOpen, onClose, apiUrl }) {
     }
   }, [logs]);
 
+  const handleCopy = async () => {
+    if (logs.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(logs.join('\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy logs', err);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -58,12 +70,22 @@ export function LogViewerModal({ isOpen, onClose, apiUrl }) {
             <Terminal className="w-4 h-4" />
             <span className="text-xs font-mono tracking-widest uppercase">System Console</span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-on-surface-variant hover:text-on-surface transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleCopy}
+              className="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 text-xs font-medium"
+              title="Copiar Logs"
+            >
+              {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+            </button>
+            <div className="w-px h-4 bg-outline-variant/50"></div>
+            <button
+              onClick={onClose}
+              className="text-on-surface-variant hover:text-error transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Terminal Body */}

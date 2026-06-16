@@ -450,7 +450,11 @@ function App() {
           setCurrentJobId(null);
         } else if (job.status === 'error' || job.status === 'timeout') {
           addToast(t('statusError') || 'Falha no download.', 'error');
-          setMessage(job.error || t('statusError'));
+          let errMsg = job.error || t('statusError');
+          if (!isAuthenticated) {
+            errMsg += "\n\n⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.";
+          }
+          setMessage(errMsg);
           setStatus('error');
           setStep('confirm');
           setCurrentJobId(null);
@@ -797,7 +801,11 @@ function App() {
             updateQueueItem(item.uniqueId, { status: 'completed', progress: 100 });
           } else if (statusData.status === 'error') {
             clearInterval(pollInterval);
-            updateQueueItem(item.uniqueId, { status: 'error', error: statusData.error });
+            let queueErrMsg = statusData.error || 'Erro';
+              if (!isAuthenticated) {
+                  queueErrMsg += ' (Dica: Adicione seus cookies.txt nas configurações!)';
+              }
+              updateQueueItem(item.uniqueId, { status: 'error', error: queueErrMsg });
           }
         } catch (e) {
           console.error(e);
@@ -1882,10 +1890,10 @@ function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-900/90 backdrop-blur text-white px-6 py-3 rounded-full shadow-2xl border border-red-500/30 flex items-center gap-3 z-50"
+              className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-900/90 backdrop-blur text-white px-6 py-3 rounded-3xl shadow-2xl border border-red-500/30 flex flex-col items-center gap-2 z-50 whitespace-pre-wrap max-w-[90vw] md:max-w-lg text-center"
             >
               <AlertCircle className="w-5 h-5 text-red-400" />
-              <span className="font-medium">{message}</span>
+              <span className="font-medium text-sm leading-snug">{message}</span>
             </motion.div>
           )}
         </AnimatePresence>

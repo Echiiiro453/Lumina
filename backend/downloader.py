@@ -7,7 +7,7 @@ import threading
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from utils import get_downloads_dir, get_cookies_path, parse_time
-from database import mark_downloaded_db, mark_error_db
+from database import mark_downloaded_db, mark_error_db, remove_job_from_queue
 from metadata_fetcher import apply_metadata
 from proxy_manager import get_random_proxy
 from lyrics_fetcher import fetch_and_embed_lyrics
@@ -240,6 +240,11 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
         'concurrent_fragment_downloads': 16,
     }
     
+    aria2c_path = os.path.join(resource_dir, 'aria2c.exe')
+    if os.path.exists(aria2c_path) and "twitch.tv" not in request.url.lower():
+        ydl_opts['external_downloader'] = aria2c_path
+        ydl_opts['external_downloader_args'] = ['-x', '16', '-s', '16', '-k', '1M', '--min-split-size=1M']
+    
     # Aplica o "Jittering" (Anti-Ban Sleep Aleatório) para TODOS os downloads e buscas
     # Impede que metralhadoras de ytsearch1: (Spotify) bloqueiem o IP instantaneamente
     ydl_opts["sleep_requests"] = 1.5
@@ -275,9 +280,19 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
     return ydl_opts
 
 def build_ydl_opts_for_strategy(job_id: str, request, strategy: dict):
+    import deno_manager
+    import os
+    
     ydl_opts = {
         'concurrent_fragments': 4,
+        'cachedir': False,
     }
+    
+    deno_path = deno_manager.get_deno_path()
+    if deno_path:
+        deno_dir = os.path.dirname(deno_path)
+        if deno_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ.get('PATH', '')}"
     if 'format' in strategy:
         ydl_opts['format'] = strategy['format']
     
@@ -306,8 +321,12 @@ def download_with_retries(job_id: str, request):
     print(f"\n\033[1;35m[+] INICIANDO SMART DOWNLOAD:\033[0m \033[36m{request.url}\033[0m")
     strategies = [
         {"name": "tv_embedded", "use_cookies": True, "client": "tv_embedded"},
+        {"name": "tv_unplugged", "use_cookies": True, "client": "tv_unplugged"},
         {"name": "web_embedded", "use_cookies": True, "client": "web_embedded", "impersonate": "chrome"},
+        {"name": "web_safari", "use_cookies": True, "client": "web_safari", "impersonate": "safari"},
         {"name": "web_creator", "use_cookies": True, "client": "web_creator", "impersonate": "chrome"},
+        {"name": "android_creator", "use_cookies": True, "client": "android_creator"},
+        {"name": "ios_creator", "use_cookies": True, "client": "ios_creator"},
         {"name": "android_vr", "use_cookies": True, "client": "android_vr"},
         {"name": "ios_music", "use_cookies": True, "client": "ios_music"},
         {"name": "android_music", "use_cookies": True, "client": "android_music"},
@@ -426,7 +445,7 @@ def download_with_retries(job_id: str, request):
                     if request.mode != 'video':
                         st.status = "processing"
                         print(f"  \033[94m-> Buscando metadados premium no iTunes...\033[0m")
-                        success = apply_metadata(full_final_path, info.get('title', ''))
+                        success = apply_metadata(full_final_path, info.get('title', ''), info.get('thumbnail'))
                         if success:
                             print(f"    \033[32mOK Capa High-Res e Tags injetadas com sucesso!\033[0m")
                         
@@ -553,4 +572,5 @@ async def worker_loop():
                     st.finished_at = time.time()
                     st.progress = 100.0
             finally:
+                remove_job_from_queue(job_id)
                 download_queue.task_done()
