@@ -593,9 +593,9 @@ export function LibraryModal({ isOpen, onClose, getApiUrl, onPlaySong, onEditTag
       >
         <div className="flex items-center gap-4 min-w-0 flex-1">
           <div className="w-14 h-14 bg-black/50 rounded-xl flex items-center justify-center flex-shrink-0 relative overflow-hidden shadow-inner group-hover:scale-105 transition-transform">
-            {song.video_id && (
+            {(song.thumbnail || song.video_id) && (
               <img
-                src={`https://i.ytimg.com/vi/${song.video_id}/0.jpg`}
+                src={song.thumbnail || `https://i.ytimg.com/vi/${song.video_id}/0.jpg`}
                 alt=""
                 className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity absolute inset-0"
                 onError={(e) => { e.target.style.display = 'none'; }}

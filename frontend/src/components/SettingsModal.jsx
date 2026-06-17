@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 import axios from 'axios';
-import { Settings, CheckCircle, AlertCircle, Upload, Mic, Power, Terminal, Database, RefreshCw, Globe, Palette, Download, Monitor } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Upload, Mic, Power, Terminal, Database, RefreshCw, Globe, Palette, Download, Monitor, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogViewerModal } from './LogViewerModal';
 import { t, setLanguage, getLanguage, LANGUAGES } from '../i18n';
@@ -17,6 +17,10 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
   const [isSavingLastfm, setIsSavingLastfm] = useState(false);
   
   const [voiceStatus, setVoiceStatus] = useState('stopped');
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [telegramEnabled, setTelegramEnabled] = useState(true);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
   
   useEffect(() => {
     if (isOpen) {
@@ -25,6 +29,27 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
   }, [isOpen]);
 
   
+  
+  const handleSaveTelegram = async () => {
+    try {
+      await axios.post(`${apiUrl}/api/settings/telegram`, { token: telegramToken, chat_id: telegramChatId, enabled: telegramEnabled });
+      // saved silently or toast
+    } catch(e) { }
+  };
+
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    try {
+      const res = await axios.post(`${apiUrl}/api/settings/telegram/test`, { token: telegramToken, chat_id: telegramChatId });
+      alert(res.data.message);
+      handleSaveTelegram(); // save if test succeeds
+    } catch(e) {
+      alert(e.response?.data?.detail || "Erro ao testar o Telegram.");
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
+
   const handleSaveLastfm = async () => {
     setIsSavingLastfm(true);
     try {
@@ -194,6 +219,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       axios.get(`${apiUrl}/api/settings/lastfm`)
         .then(res => { setLastfmUser(res.data.username); setLastfmPass(res.data.password); })
         .catch(console.error);
+      axios.get(`${apiUrl}/api/settings/telegram`)
+        .then(res => { setTelegramToken(res.data.token); setTelegramChatId(res.data.chat_id); setTelegramEnabled(res.data.enabled !== false); })
+        .catch(console.error);
     }
   }, [isOpen, apiUrl]);
 
@@ -336,11 +364,97 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
             >
               <Monitor size={18} /> {t('settingsTabSystem') || 'Sistema'}
             </button>
+            <button
+              onClick={() => setActiveTab('cloud')}
+              className={`flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all text-sm whitespace-nowrap ${activeTab === 'cloud' ? 'bg-primary text-on-primary shadow-md' : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface'}`}
+            >
+              <Cloud size={18} /> {t('settingsTabCloud') || 'Nuvem & Sync'}
+            </button>
           </div>
         </div>
 
         {/* Content Area */}
         <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar bg-surface-container relative">
+
+          {/* TAB 4: CLOUD & SYNC */}
+          {activeTab === 'cloud' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6 border-b border-outline-variant/20 pb-4">
+                <Cloud className="w-5 h-5 text-primary" /> Nuvem & Sincronização
+              </h3>
+
+              <div className="p-4 bg-surface-container-high rounded-3xl border border-outline-variant/30 space-y-4">
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-500/10 flex items-center justify-center shrink-0">
+                    <Cloud className="w-5 h-5 text-blue-400" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white">Backup Infinito (Telegram)</h4>
+                    <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+                      O Lumina pode enviar automaticamente todas as músicas baixadas para o seu chat privado ou canal no Telegram. 
+                      É um backup gratuito e infinito na nuvem, acessível do seu celular.
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between p-3 bg-surface-container-low border border-outline-variant/20 rounded-2xl mb-2">
+                  <div>
+                    <h5 className="text-sm font-bold text-on-surface">Ativar Backup na Nuvem</h5>
+                    <p className="text-[10px] text-on-surface-variant">Habilita ou desabilita o envio automático para o Telegram.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newVal = !telegramEnabled;
+                      setTelegramEnabled(newVal);
+                      setTimeout(() => {
+                        axios.post(`${apiUrl}/api/settings/telegram`, { token: telegramToken, chat_id: telegramChatId, enabled: newVal }).catch(console.error);
+                      }, 0);
+                    }}
+                    className={`w-12 h-6 rounded-full transition-colors relative flex items-center ${telegramEnabled ? 'bg-primary' : 'bg-surface-variant'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full absolute transition-transform ${telegramEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-on-surface-variant ml-1">Bot Token (via @BotFather)</label>
+                    <input
+                      type="text"
+                      value={telegramToken}
+                      onChange={(e) => setTelegramToken(e.target.value)}
+                      onBlur={handleSaveTelegram}
+                      placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ"
+                      className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface outline-none focus:border-primary transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-on-surface-variant ml-1">Chat ID (Onde o bot vai enviar)</label>
+                    <input
+                      type="text"
+                      value={telegramChatId}
+                      onChange={(e) => setTelegramChatId(e.target.value)}
+                      onBlur={handleSaveTelegram}
+                      placeholder="Ex: 12345678 ou -100987654321"
+                      className="w-full bg-surface-container-low border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface outline-none focus:border-primary transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={handleTestTelegram}
+                    disabled={isTestingTelegram || !telegramToken || !telegramChatId}
+                    className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-bold disabled:opacity-50 transition-colors shadow-lg shadow-blue-500/20 flex justify-center items-center gap-2"
+                  >
+                    {isTestingTelegram ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                    {isTestingTelegram ? 'Testando Conexão...' : 'Testar Conexão com Telegram'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           
           {/* TAB 1: APPEARANCE */}
           {activeTab === 'appearance' && (

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.0] - 2026-06-17
+### Added & Fixed
+- **BotGuard PO Token Server**: Integrado um servidor local invisível (`bgutil`) em Node.js (v24.16) que inicia junto com a aplicação, capaz de gerar e validar chaves criptográficas (Proof of Origin) do YouTube em milissegundos.
+- **SABR 4K/2K Desbloqueado**: A conexão `SABR_LIVE` foi restaurada para 100% de estabilidade. O aplicativo agora consegue burlar a proteção de DRM em clipes da VEVO e vídeos restritos de alta resolução sem quedas de conexão ou "Erro 403".
+- **Dynamic Plugin Loader**: O compilador PyInstaller (`build_exe.py`) foi atualizado para empacotar bibliotecas dinâmicas do `yt-dlp_plugins`, tornando o executável portátil autossuficiente e isolado do Node do sistema.
+- **Atualização de Assinatura JS**: Motor base (`yt-dlp`) atualizado para solucionar os recentes bloqueios de execução de scripts de assinatura (`n-sig`) implementados pelo YouTube.
+
 ## [3.4.0] - 2026-06-07
 ### Added & Fixed
 - **Isolated Subprocess Architecture**: Spotify and Apple Music scrapers now run in isolated CLI instances (`--run-spotify`) to prevent memory crashes, zombie processes, and UI window cloning.

@@ -115,10 +115,7 @@ import asyncio
 
 main_loop = None
 
-@app.on_event("startup")
-async def startup_event():
-    global main_loop
-    main_loop = asyncio.get_running_loop()
+# O loop é inicializado no evento startup principal
 
 def on_voice_command(action_data):
     try:
@@ -131,7 +128,7 @@ voice_engine = VoiceEngine(on_voice_command)
 # --------------------------------
 
 
-APP_VERSION = "3.9.0"
+APP_VERSION = "4.1.0"
 GITHUB_REPO = "Echiiiro453/youtubeMusicDownload"
 
 log_buffer = collections.deque(maxlen=500)
@@ -243,9 +240,42 @@ async def ws_broadcast_loop():
             jobs_data = {job_id: asdict(state) for job_id, state in jobs.items()}
             await manager.broadcast_json(jobs_data)
 
+bgutil_process = None
+
 @app.on_event("startup")
 async def startup_event():
+    global main_loop, bgutil_process
+    main_loop = asyncio.get_running_loop()
+    
     init_db()
+    
+    # Start BGUtil Node Server
+    try:
+        import subprocess
+        from utils import get_resource_path, get_data_dir
+        
+        server_dir = get_resource_path("bgutil_server")
+        server_path = os.path.join(server_dir, "build", "main.js")
+        
+        node_exe = get_resource_path("node.exe")
+        if not os.path.exists(node_exe):
+            node_exe = "node"
+            
+        log_path = os.path.join(get_data_dir(), "bgutil_node.log")
+        log_file = open(log_path, "w")
+        
+        # Ocultar janela no Windows
+        CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+        bgutil_process = subprocess.Popen(
+            [node_exe, server_path],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            cwd=server_dir,
+            creationflags=CREATE_NO_WINDOW
+        )
+        print("[Startup] BGUtil PO Token Server started on port 4416")
+    except Exception as e:
+        print(f"[Startup] Error starting BGUtil Server: {e}")
     
     # Initialize download_sem from database so it respects the saved user settings on boot
     import downloader
@@ -293,6 +323,16 @@ async def startup_event():
         print(f"[Startup] Hotkey {current_miniplayer_hotkey} registered for Mini Player")
     except Exception as e:
         print(f"[Startup] Error registering hotkey: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global bgutil_process
+    if bgutil_process:
+        try:
+            bgutil_process.terminate()
+            print("[Shutdown] BGUtil PO Token Server terminated")
+        except:
+            pass
 
 
 class InfoRequest(BaseModel):

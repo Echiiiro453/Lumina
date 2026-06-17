@@ -29,7 +29,8 @@ def main():
         ("../TERMS.md", "."),
         ("lyrics_fetcher.py", "."),
         ("icon.ico", "."),
-        ("C:/Users/andrey/AppData/Local/Programs/Python/Python310/Lib/site-packages/vosk", "vosk")
+        ("C:/Users/andrey/AppData/Local/Programs/Python/Python310/Lib/site-packages/vosk", "vosk"),
+        ("bgutil_server", "bgutil_server")
     ]
     
     # Imports ocultos (Essenciais para uvicorn e yt-dlp)
@@ -68,7 +69,8 @@ def main():
         "SpotipyFree",
         "spotapi",
         "tls_client",
-        "keyboard"
+        "keyboard",
+        "yt_dlp_plugins"
     ]
     
     # Montar comando
@@ -88,7 +90,8 @@ def main():
         "--collect-all", "spotapi",
         "--collect-all", "SpotipyFree",
         "--collect-all", "vosk",
-        "--collect-all", "sounddevice"
+        "--collect-all", "sounddevice",
+        "--collect-all", "yt_dlp_plugins"
     ]
     
     for src, dst in binaries:

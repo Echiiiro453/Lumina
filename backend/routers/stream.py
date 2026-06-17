@@ -755,9 +755,14 @@ async def get_info(request: StreamDownloadRequest):
             
             info = None
             last_err = None
-            for client in ['android_vr', 'tv_embedded', 'web_embedded', 'ios_music', 'android_music', 'tv', 'web', 'web_creator']:
+            for client in ['web_sabr', 'android_vr', 'tv_embedded', 'web_embedded', 'ios_music', 'android_music', 'tv', 'web', 'web_creator']:
                 try:
-                    if client != 'web': ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+                    if client == 'web_sabr':
+                        ydl_opts['extractor_args'] = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}, 'youtube': {'formats': ['duplicate'], 'player_client': ['web'], 'webpage_client': ['web']}}
+                    elif client != 'web': 
+                        ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+                    elif 'extractor_args' in ydl_opts:
+                        del ydl_opts['extractor_args']
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
                     break

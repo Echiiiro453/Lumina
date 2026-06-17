@@ -302,7 +302,10 @@ def build_ydl_opts_for_strategy(job_id: str, request, strategy: dict):
         ydl_opts["cookiefile"] = get_cookies_path()
         
     client = strategy.get("client")
-    if client:
+    if strategy.get("extractor_args_override"):
+        ydl_opts.setdefault("extractor_args", {})
+        ydl_opts["extractor_args"].update(strategy["extractor_args_override"])
+    elif client:
         ydl_opts.setdefault("extractor_args", {})
         ydl_opts["extractor_args"]["youtube"] = {"player_client": [client]}
         
@@ -320,6 +323,7 @@ def build_ydl_opts_for_strategy(job_id: str, request, strategy: dict):
 def download_with_retries(job_id: str, request):
     print(f"\n\033[1;35m[+] INICIANDO SMART DOWNLOAD:\033[0m \033[36m{request.url}\033[0m")
     strategies = [
+        {"name": "sabr_live", "format": "ba[protocol=sabr]+bv[protocol=sabr]/bestvideo+bestaudio/best", "use_cookies": True, "client": "web", "extractor_args_override": {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}, 'youtube': {'formats': ['duplicate'], 'player_client': ['web'], 'webpage_client': ['web']}}},
         {"name": "tv_embedded", "use_cookies": True, "client": "tv_embedded"},
         {"name": "tv_unplugged", "use_cookies": True, "client": "tv_unplugged"},
         {"name": "web_embedded", "use_cookies": True, "client": "web_embedded", "impersonate": "chrome"},
@@ -469,6 +473,11 @@ def download_with_retries(job_id: str, request):
                     real_playlist_id = getattr(request, 'playlist_id', None) or info.get('playlist_id')
                     
                     mark_downloaded_db(real_playlist_id, real_video_id, info.get('title', 'Unknown'), final_filename_relative, request.url)
+                    
+                    # Telegram Upload Hook
+                    import telegram_sync
+                    telegram_sync.trigger_upload_if_enabled(full_final_path, info.get('title', 'Unknown'))
+                    
                     print(f"  \033[32mOK SUCESSO! Download concluído usando o método: {strat_name}\033[0m\n")
 
             

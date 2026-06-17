@@ -122,8 +122,55 @@ def set_lastfm(body: dict):
         conn = get_conn()
         cur = conn.cursor()
         cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('lastfm_username', ?)", (username,))
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "username": username}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/settings/telegram")
+def get_telegram_settings():
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'")
+        token_row = cur.fetchone()
+        cur.execute("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'")
+        chat_row = cur.fetchone()
+        cur.execute("SELECT value FROM app_settings WHERE key = 'telegram_enabled'")
+        enabled_row = cur.fetchone()
+        conn.close()
+        return {
+            "token": token_row['value'] if token_row else "",
+            "chat_id": chat_row['value'] if chat_row else "",
+            "enabled": (enabled_row['value'] == 'true') if enabled_row else True
+        }
+    except Exception as e:
+        return {"token": "", "chat_id": "", "enabled": True}
+
+@router.post("/api/settings/telegram")
+def set_telegram_settings(body: dict):
+    token = body.get("token", "").strip()
+    chat_id = body.get("chat_id", "").strip()
+    enabled = str(body.get("enabled", True)).lower()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('telegram_bot_token', ?)", (token,))
+        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('telegram_chat_id', ?)", (chat_id,))
+        cur.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('telegram_enabled', ?)", (enabled,))
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/settings/telegram/test")
+def test_telegram_settings(body: dict):
+    token = body.get("token", "").strip()
+    chat_id = body.get("chat_id", "").strip()
+    if not token or not chat_id:
+        raise HTTPException(status_code=400, detail="Token e Chat ID são obrigatórios.")
+    
+    import telegram_sync
+    res = telegram_sync.send_test_message(token, chat_id)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return {"status": "ok", "message": "Mensagem de teste enviada com sucesso!"}
