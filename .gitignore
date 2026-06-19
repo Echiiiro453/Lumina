@@ -28,6 +28,12 @@ backend/ffmpeg.exe
 backend/ffprobe.exe
 backend/ffplay.exe
 
+# PyInstaller build artifacts (contain DLLs >100MB, excluded from GitHub)
+backend/Lumina.exe_extracted/
+backend/build/
+backend/dist/
+backend/build_log_v*.txt
+
 
 # IDEs
 .vscode/

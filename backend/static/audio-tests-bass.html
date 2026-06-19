@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumina Bass Enhancer Synthetic Test</title>
+  <style>
+    body { background: #121212; color: #fff; font-family: monospace; padding: 20px; }
+    .pass { color: #00ff00; }
+    .fail { color: #ff0000; }
+    .log { background: #222; padding: 10px; border-radius: 5px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Lumina Bass Enhancer - Mathematical Purity Test</h2>
+  <div id="status">Running Tests...</div>
+  <pre id="log" class="log"></pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+    const log = (msg, isError=false) => {
+      logEl.innerHTML += `<span class="${isError?'fail':'pass'}">${msg}</span>\n`;
+    };
+
+    async function runTest() {
+      try {
+        log('Initializing OfflineAudioContext (44100Hz, 1 second)...');
+        const ctx = new OfflineAudioContext(1, 44100, 44100);
+
+        log('Generating pure 40Hz Sine Wave (Sub Bass)...');
+        const osc = ctx.createOscillator();
+        osc.frequency.value = 40;
+        
+        log('Creating Psychoacoustic Bass Enhancer Curve...');
+        const amount = 5.0; // Max intensity
+        const n = 512;
+        const curve = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          let x = (i * 2) / n - 1;
+          curve[i] = x + amount * (x - (x * x * x) / 3);
+        }
+
+        const shaper = ctx.createWaveShaper();
+        shaper.curve = curve;
+        shaper.oversample = '4x'; // Oversampling to prevent Aliasing
+
+        osc.connect(shaper);
+        shaper.connect(ctx.destination);
+        osc.start();
+
+        log('Rendering offline audio graph...');
+        const renderedBuffer = await ctx.startRendering();
+        
+        log('Analyzing rendered samples for DC Offset and Asymmetry...');
+        let sum = 0;
+        let min = 0;
+        let max = 0;
+        const data = renderedBuffer.getChannelData(0);
+
+        for (let i = 0; i < data.length; i++) {
+          const val = data[i];
+          sum += val;
+          if (val > max) max = val;
+          if (val < min) min = val;
+        }
+
+        const dcOffset = sum / data.length;
+        const symmetry = Math.abs(max) - Math.abs(min);
+        
+        log(`\n--- RESULTS ---`);
+        log(`Max Positive Peak: ${max.toFixed(4)}`);
+        log(`Max Negative Peak: ${min.toFixed(4)}`);
+        log(`Symmetry Delta: ${symmetry.toFixed(6)} (Expected ~0.0)`);
+        log(`DC Offset: ${dcOffset.toFixed(6)} (Expected ~0.0)`);
+
+        if (Math.abs(dcOffset) < 0.05 && Math.abs(symmetry) < 0.05) {
+          statusEl.innerHTML = '<span class="pass">TEST PASSED: Pure Odd-Harmonic Generation Verified!</span>';
+          log(`\nSUCCESS: The Bass Enhancer math generates perfect symmetrical harmonics with zero DC offset or asymmetrical artifacts.`);
+        } else {
+          statusEl.innerHTML = '<span class="fail">TEST FAILED: Mathematical Corruption Detected!</span>';
+          log(`\nFAILURE: The distortion curve has asymmetrical bias or DC offset.`, true);
+        }
+
+      } catch (err) {
+        statusEl.innerHTML = '<span class="fail">TEST CRASHED!</span>';
+        log(`Error: ${err.message}`, true);
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

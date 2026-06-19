@@ -59,3 +59,55 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* Custom Audio Studio Sliders & Faders */
+.studio-fader {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.studio-fader::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  height: 4px;
+}
+.studio-fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--md-sys-color-primary, #d0bcff);
+  box-shadow: 0 0 8px var(--md-sys-color-primary, #d0bcff);
+  cursor: pointer;
+  margin-top: -5px;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.studio-fader::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 12px var(--md-sys-color-primary, #d0bcff), 0 0 4px var(--md-sys-color-on-primary-container, #eaddff);
+}
+.studio-fader::-webkit-slider-thumb:active {
+  transform: scale(1.3);
+}
+
+.studio-slider-vertical {
+  width: 120px;
+  height: 4px;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+/* Glassmorphic custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

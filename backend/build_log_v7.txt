@@ -1,0 +1,22 @@
+187 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.5
+187 INFO: Python: 3.10.4
+199 INFO: Platform: Windows-10-10.0.19044-SP0
+199 INFO: Python environment: C:\Users\andrey\AppData\Local\Programs\Python\Python310
+202 INFO: Removing temporary files and cleaning cache in C:\Users\andrey\AppData\Local\pyinstaller
+Traceback (most recent call last):
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\Scripts\pyinstaller.exe\__main__.py", line 7, in <module>
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\__main__.py", line 231, in _console_script_run
+    run()
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\__main__.py", line 215, in run
+    run_build(pyi_config, spec_file, **vars(args))
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\__main__.py", line 70, in run_build
+    PyInstaller.building.build_main.main(pyi_config, spec_file, **kwargs)
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\building\build_main.py", line 1275, in main
+    build(specfile, distpath, workpath, clean_build)
+  File "C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\building\build_main.py", line 1170, in build
+    os.remove(f)
+PermissionError: [WinError 32] O arquivo já está sendo usado por outro processo: 'E:\\youtubr\\youtubeMusicDownload-main\\backend\\build\\Lumina\\Lumina.pkg'

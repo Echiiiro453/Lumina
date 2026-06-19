@@ -162,6 +162,9 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
     if request.eq_preset and request.eq_preset in EQ_PRESETS:
          af_filters.append(EQ_PRESETS[request.eq_preset])
 
+    if getattr(request, 'spatial_audio', False) and request.mode != 'video':
+         af_filters.append("apulsator=mode=sine:hz=0.125,aecho=0.8:0.9:1000:0.3")
+
     if request.mode != 'video':
          af_filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
 
@@ -239,6 +242,27 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
         'extractor_args': {'youtube': {'player_client': ['tv']}},
         'concurrent_fragment_downloads': 16,
     }
+    
+    # Hybrid Trim Logic
+    if getattr(request, 'start_time', None) or getattr(request, 'end_time', None):
+        def make_download_range_func(start_time, end_time):
+            def download_range_func(info_dict, ydl):
+                is_live = info_dict.get('is_live')
+                duration = info_dict.get('duration', 0)
+                if is_live or duration > 1800:
+                    def time_to_sec(t_str):
+                        if not t_str: return 0
+                        parts = list(map(int, t_str.split(':')))
+                        if len(parts) == 2: return parts[0]*60 + parts[1]
+                        if len(parts) == 3: return parts[0]*3600 + parts[1]*60 + parts[2]
+                        return 0
+                    s = time_to_sec(start_time) if start_time else 0
+                    e = time_to_sec(end_time) if end_time else duration
+                    return [{'start_time': s, 'end_time': e}]
+                return [{}]
+            return download_range_func
+        ydl_opts['download_ranges'] = make_download_range_func(request.start_time, request.end_time)
+        ydl_opts['force_keyframes_at_cuts'] = True
     
     aria2c_path = os.path.join(resource_dir, 'aria2c.exe')
     if os.path.exists(aria2c_path) and "twitch.tv" not in request.url.lower():
@@ -444,6 +468,47 @@ def download_with_retries(job_id: str, request):
                                     final_filename_relative = os.path.relpath(full_final_path, get_downloads_dir())
                             except Exception as e:
                                 print(f"  \033[33mWARN Erro ao renomear arquivo limpo: {e}\033[0m")
+
+                    # Handle Trimming (start_time / end_time) post-download
+                    trim_start = getattr(request, 'start_time', None)
+                    trim_end = getattr(request, 'end_time', None)
+                    is_live = info.get('is_live')
+                    duration = info.get('duration', 0)
+                    
+                    if (trim_start or trim_end) and not (is_live or duration > 1800):
+                        st.status = "processing"
+                        print(f"  \033[94m-> Recortando arquivo localmente (Trim)...\033[0m")
+                        import subprocess
+                        temp_trim_path = full_final_path + ".trimmed.tmp"
+                        
+                        # Find ffmpeg location
+                        ffmpeg_exe = "ffmpeg"
+                        resource_dir = os.path.dirname(os.path.abspath(__file__))
+                        if getattr(sys, 'frozen', False):
+                            if hasattr(sys, '_MEIPASS'): resource_dir = sys._MEIPASS
+                            else: resource_dir = os.path.join(os.path.dirname(sys.executable), '_internal')
+                        local_ffmpeg = os.path.join(resource_dir, 'ffmpeg.exe')
+                        if os.path.exists(local_ffmpeg): ffmpeg_exe = local_ffmpeg
+                        
+                        trim_cmd = [ffmpeg_exe, "-y"]
+                        if trim_start:
+                            trim_cmd.extend(["-ss", str(trim_start)])
+                        if trim_end:
+                            trim_cmd.extend(["-to", str(trim_end)])
+                        trim_cmd.extend(["-i", full_final_path, "-c", "copy", temp_trim_path])
+                        
+                        try:
+                            CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+                            subprocess.run(trim_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=CREATE_NO_WINDOW)
+                            if os.path.exists(temp_trim_path) and os.path.getsize(temp_trim_path) > 0:
+                                os.replace(temp_trim_path, full_final_path)
+                                print(f"    \033[32mOK Arquivo recortado com sucesso!\033[0m")
+                            else:
+                                if os.path.exists(temp_trim_path): os.remove(temp_trim_path)
+                                print(f"  \033[33mWARN Falha no recorte, arquivo vazio. Mantendo original.\033[0m")
+                        except Exception as e:
+                            if os.path.exists(temp_trim_path): os.remove(temp_trim_path)
+                            print(f"  \033[33mWARN Erro ao recortar arquivo: {e}\033[0m")
 
                     # Apply Premium Metadata
                     if request.mode != 'video':

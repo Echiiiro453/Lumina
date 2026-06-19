@@ -4,6 +4,9 @@ import { Music, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, X, Maximiz
 import { motion, AnimatePresence } from 'framer-motion';
 import { RippleButton } from './Ripple';
 import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
+import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
+
+const widthGains = { 'Estreito': 0.5, 'Natural': 1.0, 'Largo': 1.5, 'Ultra': 2.2 };
 
 
 const createReverbIR = (audioCtx, duration, decay) => {
@@ -17,6 +20,20 @@ const createReverbIR = (audioCtx, duration, decay) => {
     right[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
   }
   return impulse;
+};
+
+const makeExciterCurve = (amount) => {
+  const n = 256;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / (n - 1) - 1;
+    if (amount === 0) {
+      curve[i] = x;
+    } else {
+      curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
+    }
+  }
+  return curve;
 };
 
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
@@ -45,8 +62,73 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [sleepTimer, setSleepTimer] = useState(null);
   const [sleepTimeLeft, setSleepTimeLeft] = useState(null);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
-  const crossfadeGainRef = useRef(null);
 
+  // --- Advanced DSP States & Refs ---
+  const [enableTransient, setEnableTransient] = useState(false);
+  const [transientAttack, setTransientAttack] = useState(1.0);
+  const [transientSustain, setTransientSustain] = useState(0.0);
+  const transientRef = useRef(null);
+
+  const [enableAdaptiveEq, setEnableAdaptiveEq] = useState(false);
+  const adaptiveEqRef = useRef(null);
+
+  const [enableDeesser, setEnableDeesser] = useState(false);
+  const deesserRef = useRef(null);
+
+  const [enableDeharsh, setEnableDeharsh] = useState(false);
+  const deharshRef = useRef(null);
+
+  const [enableSaturation, setEnableSaturation] = useState(false);
+  const [satDrive, setSatDrive] = useState(0.5);
+  const [satMode, setSatMode] = useState('tube');
+  const saturationRef = useRef(null);
+
+  const [enableSubmono, setEnableSubmono] = useState(false);
+  const submonoRef = useRef(null);
+
+  const [enableCrossfeed, setEnableCrossfeed] = useState(false);
+  const [crossfeedAmount, setCrossfeedAmount] = useState(0.5);
+  const crossfeedRef = useRef(null);
+
+  const masteringRef = useRef(null);
+  const lufsRef = useRef(null);
+  const [lufsValue, setLufsValue] = useState(null);
+
+  // --- Missing / New DSP States & Refs ---
+  const masterGainRef = useRef(null);
+  const [enable8D, setEnable8D] = useState(false);
+  const [motionMode, setMotionMode] = useState('Parado');
+  const [motionSpeed, setMotionSpeed] = useState(0.5);
+  const [motionRadius, setMotionRadius] = useState(2.0);
+  const [stereoWidth, setStereoWidth] = useState('Natural');
+  const [bassEnhancer, setBassEnhancer] = useState(false);
+  const [bassIntensity, setBassIntensity] = useState(50);
+  const [roomMorphing, setRoomMorphing] = useState(false);
+  const [lufsMode, setLufsMode] = useState('Streaming');
+  const [spatialMode, setSpatialMode] = useState('Concerto');
+  const [genreProfile, setGenreProfile] = useState('Rock');
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [harmonicExciter, setHarmonicExciter] = useState('medium');
+
+  const [enablePhaseRotation, setEnablePhaseRotation] = useState(false);
+  const [enableSpectralGlue, setEnableSpectralGlue] = useState(false);
+  const [spectralGlueThreshold, setSpectralGlueThreshold] = useState(-24.0);
+  const spectralGlueRef = useRef(null);
+
+  const [enableStereoDepth, setEnableStereoDepth] = useState(false);
+  const [stereoDepthAmount, setStereoDepthAmount] = useState(0.5);
+  const depthRef = useRef(null);
+
+  const panner8DRef = useRef(null);
+  const stereoWidthRef = useRef(null);
+  const bassEnhancerGainRef = useRef(null);
+  const bassShaperRef = useRef(null);
+  const occlusionFilterRef = useRef(null);
+  const exciterNodeRef = useRef(null);
+  const crossfadeTimeoutRef = useRef(null);
+  
+  const workletAnchorRef = useRef({ pre: null, post: null });
+  const loadedModulesRef = useRef({}); // To track which modules are loaded
 
   // --- Voice Commands Listener ---
   useEffect(() => {
@@ -199,13 +281,148 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [reverbMix]);
 
-  const initAudioVisualizer = () => {
+  // --- Propagate DSP parameter changes ---
+  useEffect(() => {
+    if (transientRef.current) transientRef.current.port.postMessage({ attackAmount: transientAttack, sustainAmount: transientSustain });
+  }, [transientAttack, transientSustain]);
+
+  useEffect(() => {
+    if (saturationRef.current) saturationRef.current.port.postMessage({ mode: satMode, drive: satDrive, mix: 1.0 });
+  }, [satMode, satDrive]);
+
+  useEffect(() => {
+    if (crossfeedRef.current) {
+      const node = crossfeedRef.current.node;
+      if (node && node.port) {
+        node.port.postMessage({ crossfeedAmount });
+      }
+      // Update mock properties for AudioDiagnosticsPanel
+      crossfeedRef.current.cfGainLR = { gain: { value: enableCrossfeed ? crossfeedAmount : 0 } };
+      crossfeedRef.current.cfGainRL = { gain: { value: enableCrossfeed ? crossfeedAmount : 0 } };
+    }
+  }, [crossfeedAmount, enableCrossfeed]);
+
+  useEffect(() => {
+    if (exciterNodeRef.current && audioContextRef.current) {
+      const amountMap = { off: 0.0, subtle: 0.25, medium: 0.5, strong: 0.85 };
+      const val = amountMap[harmonicExciter] !== undefined ? amountMap[harmonicExciter] : 0.5;
+      exciterNodeRef.current.port.postMessage({ amount: val });
+    }
+  }, [harmonicExciter]);
+
+  useEffect(() => {
+    if (stereoWidthRef.current && audioContextRef.current) {
+      const widthMap = { Estreito: 0.5, Natural: 1.0, Largo: 1.4, Ultra: 1.8 };
+      const wVal = widthMap[stereoWidth] !== undefined ? widthMap[stereoWidth] : 1.0;
+      stereoWidthRef.current.port.postMessage({ width: wVal });
+    }
+  }, [stereoWidth]);
+
+  useEffect(() => {
+    const g = bassEnhancer ? (bassIntensity / 100) : 0.0;
+    if (bassEnhancerGainRef.current && audioContextRef.current) {
+      bassEnhancerGainRef.current.gain.setTargetAtTime(g, audioContextRef.current.currentTime, 0.1);
+    }
+    if (submonoRef.current) {
+      submonoRef.current.port.postMessage({ bassRecovery: g });
+    }
+  }, [bassEnhancer, bassIntensity]);
+
+  useEffect(() => {
+    if (masteringRef.current) {
+      masteringRef.current.port.postMessage({ enablePhaseRotation });
+    }
+  }, [enablePhaseRotation]);
+
+  useEffect(() => {
+    if (spectralGlueRef.current) {
+      spectralGlueRef.current.port.postMessage({ active: enableSpectralGlue, threshold: spectralGlueThreshold });
+    }
+  }, [enableSpectralGlue, spectralGlueThreshold]);
+
+  useEffect(() => {
+    if (depthRef.current) {
+      depthRef.current.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
+    }
+  }, [enableStereoDepth, stereoDepthAmount]);
+
+  // 8D Audio Motion System Loop
+  useEffect(() => {
+    if (!enable8D || motionMode === 'Parado') {
+      if (panner8DRef.current && audioContextRef.current) {
+        panner8DRef.current.pan.setValueAtTime(0, audioContextRef.current.currentTime);
+      }
+      return;
+    }
+
+    let animationFrameId;
+    let theta = 0;
+
+    const updatePan = () => {
+      if (!panner8DRef.current || !audioContextRef.current) return;
+      
+      theta += (motionSpeed * 0.03);
+      
+      let pan = 0;
+      switch (motionMode) {
+        case 'Elipse':
+          pan = Math.sin(theta);
+          break;
+        case 'Figura 8':
+          pan = Math.sin(2 * theta);
+          break;
+        case 'Espiral':
+          pan = Math.sin(theta) * (0.5 + 0.5 * Math.cos(theta / 5));
+          break;
+        case 'Vertical':
+          pan = Math.sin(theta * 2) * 0.3;
+          break;
+        case 'Caos':
+          pan = Math.sin(theta) * Math.sin(theta * 1.43) * Math.cos(theta * 0.77);
+          break;
+        case 'Reativo':
+          pan = Math.sin(theta) * 0.8;
+          break;
+        default:
+          pan = Math.sin(theta);
+      }
+
+      const maxPan = Math.min(1.0, motionRadius / 5.0);
+      const targetPan = Math.max(-1.0, Math.min(1.0, pan * maxPan));
+      
+      panner8DRef.current.pan.setValueAtTime(targetPan, audioContextRef.current.currentTime);
+      
+      animationFrameId = requestAnimationFrame(updatePan);
+    };
+
+    updatePan();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [enable8D, motionMode, motionSpeed, motionRadius, isPlaying]);
+
+  const initAudioVisualizer = async () => {
     if (!audioRef.current || audioContextRef.current) return;
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
-      const source = audioCtx.createMediaElementSource(audioRef.current);
+      const mediaSource = audioCtx.createMediaElementSource(audioRef.current);
+      const source = audioCtx.createGain(); // Mixer bus
+      mediaSource.connect(source);
+
+      // QA Denormal Number Fix (Inject 1e-10 DC Noise Floor to prevent CPU denormal spikes)
+      const ditherBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+      const ditherData = ditherBuffer.getChannelData(0);
+      for (let i = 0; i < ditherData.length; i++) {
+        ditherData[i] = (Math.random() * 2 - 1) * 1e-10; // -200dBFS noise
+      }
+      const ditherSrc = audioCtx.createBufferSource();
+      ditherSrc.buffer = ditherBuffer;
+      ditherSrc.loop = true;
+      ditherSrc.start();
+      ditherSrc.connect(source);
       
       // Criar 10 bandas do equalizador
       const filters = [];
@@ -222,7 +439,153 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       }
       eqFiltersRef.current = filters;
 
-      // Conectar source -> EQ -> (Split para Dry e Wet(Reverb)) -> destination
+      // Worklet anchor pre/post
+      const preNode = audioCtx.createGain();
+      const postNode = audioCtx.createGain();
+      workletAnchorRef.current = { pre: preNode, post: postNode };
+
+      source.connect(filters[0]);
+      for (let i = 0; i < filters.length - 1; i++) {
+        filters[i].connect(filters[i+1]);
+      }
+
+      // Filtro de Oclusão (para diagnóstico e efeitos futuros de atenuação)
+      const occlusionNode = audioCtx.createBiquadFilter();
+      occlusionNode.type = 'lowpass';
+      occlusionNode.frequency.value = 20000;
+      occlusionFilterRef.current = occlusionNode;
+
+      filters[filters.length - 1].connect(occlusionNode);
+      occlusionNode.connect(preNode);
+
+      // Bass Enhancer Psicoacústico (Caminho paralelo: preNode -> LPF -> Shaper -> Gain -> postNode)
+      const bassLPF = audioCtx.createBiquadFilter();
+      bassLPF.type = 'lowpass';
+      bassLPF.frequency.value = 120;
+
+      const bassShaper = audioCtx.createWaveShaper();
+      const bassCurve = new Float32Array(512);
+      const bassAmount = 5.0;
+      for (let i = 0; i < 512; i++) {
+        let x = (i * 2) / 512 - 1;
+        bassCurve[i] = x + bassAmount * (x - (x * x * x) / 3);
+      }
+      bassShaper.curve = bassCurve;
+      bassShaper.oversample = '4x';
+      bassShaperRef.current = bassShaper;
+
+      const bassEnhancerGain = audioCtx.createGain();
+      bassEnhancerGain.gain.value = bassEnhancer ? (bassIntensity / 100) : 0.0;
+      bassEnhancerGainRef.current = bassEnhancerGain;
+
+      preNode.connect(bassLPF);
+      bassLPF.connect(bassShaper);
+      bassShaper.connect(bassEnhancerGain);
+      bassEnhancerGain.connect(postNode);
+
+      // --- DSP Chain Assembly ---
+      let currentNode = preNode;
+
+      const loadModule = async (path) => {
+        if (!loadedModulesRef.current[path]) {
+          await audioCtx.audioWorklet.addModule(path);
+          loadedModulesRef.current[path] = true;
+        }
+      };
+
+      if (enableTransient) {
+        await loadModule('/transient-processor.js');
+        const transientNode = new AudioWorkletNode(audioCtx, 'transient-shaper');
+        transientNode.port.postMessage({ attackAmount: transientAttack, sustainAmount: transientSustain });
+        transientRef.current = transientNode;
+        currentNode.connect(transientNode);
+        currentNode = transientNode;
+      }
+      if (enableAdaptiveEq) {
+        await loadModule('/adaptive-eq-processor.js');
+        const adaptiveEqNode = new AudioWorkletNode(audioCtx, 'adaptive-eq');
+        adaptiveEqRef.current = adaptiveEqNode;
+        currentNode.connect(adaptiveEqNode);
+        currentNode = adaptiveEqNode;
+      }
+      if (enableDeesser) {
+        await loadModule('/deesser-processor.js');
+        const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
+        deesserRef.current = deesserNode;
+        currentNode.connect(deesserNode);
+        currentNode = deesserNode;
+      }
+      if (enableDeharsh) {
+        await loadModule('/deharsh-processor.js');
+        const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
+        deharshRef.current = deharshNode;
+        currentNode.connect(deharshNode);
+        currentNode = deharshNode;
+      }
+      if (enableSaturation) {
+        await loadModule('/saturation-processor.js');
+        const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
+        saturationNode.port.postMessage({ mode: satMode, drive: satDrive, mix: 1.0 });
+        saturationRef.current = saturationNode;
+        currentNode.connect(saturationNode);
+        currentNode = saturationNode;
+      }
+      if (enableSubmono) {
+        await loadModule('/submono-processor.js');
+        const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
+        submonoRef.current = submonoNode;
+        currentNode.connect(submonoNode);
+        currentNode = submonoNode;
+      }
+      if (enableCrossfeed) {
+        await loadModule('/crossfeed-processor.js');
+        const crossfeedNode = new AudioWorkletNode(audioCtx, 'crossfeed');
+        crossfeedNode.port.postMessage({ crossfeedAmount });
+        // Simulating the object format AudioDiagnosticsPanel expects: { cfGainLR, cfGainRL }
+        crossfeedRef.current = { 
+          cfGainLR: { gain: { value: crossfeedAmount } }, 
+          cfGainRL: { gain: { value: crossfeedAmount } },
+          node: crossfeedNode 
+        }; 
+        currentNode.connect(crossfeedNode);
+        currentNode = crossfeedNode;
+      }
+
+      currentNode.connect(postNode);
+
+      // --- Multiband Width Processor (Crossovers SVF TPT & M/S Potência Constante) ---
+      await loadModule('/multiband-width-processor.js');
+      const mbWidthNode = new AudioWorkletNode(audioCtx, 'multiband-width');
+      const widthMap = { Estreito: 0.5, Natural: 1.0, Largo: 1.4, Ultra: 1.8 };
+      const wVal = widthMap[stereoWidth] !== undefined ? widthMap[stereoWidth] : 1.0;
+      mbWidthNode.port.postMessage({ width: wVal });
+      stereoWidthRef.current = mbWidthNode;
+      
+      // --- Harmonic Exciter (High-Pass Parallel Saturation com ADAA e 2x Oversampling) ---
+      await loadModule('/exciter-processor.js');
+      const exciterNode = new AudioWorkletNode(audioCtx, 'exciter');
+      const amountMap = { off: 0.0, subtle: 0.25, medium: 0.5, strong: 0.85 };
+      const exciterVal = amountMap[harmonicExciter] !== undefined ? amountMap[harmonicExciter] : 0.5;
+      exciterNode.port.postMessage({ amount: exciterVal });
+      exciterNodeRef.current = exciterNode;
+      
+      postNode.connect(exciterNode);
+      
+      let nextNodeAfterExciter = exciterNode;
+      try {
+        await loadModule('/depth-processor.js');
+        const depthNode = new AudioWorkletNode(audioCtx, 'depth');
+        depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
+        depthRef.current = depthNode;
+        exciterNode.connect(depthNode);
+        nextNodeAfterExciter = depthNode;
+      } catch (e) {
+        console.warn("Lumina depth load failed, skipping", e);
+      }
+      
+      nextNodeAfterExciter.connect(mbWidthNode);
+
+      // Split para Dry e Wet(Reverb)
       const dryNode = audioCtx.createGain();
       const wetNode = audioCtx.createGain();
       const convolver = audioCtx.createConvolver();
@@ -236,17 +599,62 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       dryNode.gain.value = 1.0 - reverbMix;
       wetNode.gain.value = reverbMix;
       
-      source.connect(filters[0]);
-      for (let i = 0; i < filters.length - 1; i++) {
-        filters[i].connect(filters[i+1]);
+      mbWidthNode.connect(dryNode);
+      mbWidthNode.connect(convolver);
+      convolver.connect(wetNode);
+
+      // --- Mastering & LUFS ---
+      const masterSum = audioCtx.createGain();
+      dryNode.connect(masterSum);
+      wetNode.connect(masterSum);
+      masterGainRef.current = masterSum;
+
+      let finalNode = masterSum;
+
+      try {
+        await loadModule('/spectral-glue-processor.js');
+        const glueNode = new AudioWorkletNode(audioCtx, 'spectral-glue');
+        glueNode.port.postMessage({ active: enableSpectralGlue, threshold: spectralGlueThreshold });
+        spectralGlueRef.current = glueNode;
+        finalNode.connect(glueNode);
+        finalNode = glueNode;
+      } catch (e) {
+        console.warn("Spectral glue load failed, skipping", e);
+      }
+
+      try {
+        await loadModule('/lumina-mastering.js');
+        const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
+        masteringNode.port.postMessage({ enablePhaseRotation });
+        masteringRef.current = masteringNode;
+        finalNode.connect(masteringNode);
+        finalNode = masteringNode;
+      } catch (e) {
+        console.warn("Lumina mastering load failed, skipping", e);
+      }
+
+      try {
+        await loadModule('/lufs-meter-processor.js');
+        const lufsNode = new AudioWorkletNode(audioCtx, 'lufs-meter');
+        lufsNode.port.onmessage = (msg) => {
+          if (msg.data && msg.data.lufs !== undefined) {
+            setLufsValue(Math.round(msg.data.lufs * 10) / 10);
+          }
+        };
+        lufsRef.current = lufsNode;
+        finalNode.connect(lufsNode);
+        finalNode = lufsNode;
+      } catch (e) {
+        console.warn("LUFS meter load failed", e);
       }
       
-      filters[filters.length - 1].connect(dryNode);
-      filters[filters.length - 1].connect(convolver);
-      convolver.connect(wetNode);
-      
-      dryNode.connect(analyser);
-      wetNode.connect(analyser);
+      // 8D Binaural Stereo Panner
+      const panner8DNode = audioCtx.createStereoPanner();
+      panner8DNode.pan.value = 0.0;
+      panner8DRef.current = panner8DNode;
+
+      finalNode.connect(panner8DNode);
+      panner8DNode.connect(analyser);
       analyser.connect(audioCtx.destination);
       
       audioContextRef.current = audioCtx;
@@ -254,7 +662,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       
       drawVisualizer();
     } catch (e) {
-      console.error("Erro ao inicializar visualizador/equalizador:", e);
+      console.error("Erro ao inicializar visualizador/equalizador/dsp:", e);
     }
   };
 
@@ -862,6 +1270,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
                   <SlidersHorizontal size={24} />
                 </RippleButton>
 
+                <RippleButton 
+                  onClick={() => setShowDiagnostics(true)} 
+                  className="text-on-surface-variant/50 hover:text-on-surface transition-colors" 
+                  title="Diagnóstico de Áudio"
+                >
+                  <Activity size={24} />
+                </RippleButton>
+
               </div>
               
               {/* Volume */}
@@ -1004,6 +1420,54 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           setPreservesPitch={setPreservesPitch}
           reverbMix={reverbMix}
           setReverbMix={setReverbMix}
+          // DSP Props
+          enableTransient={enableTransient} setEnableTransient={setEnableTransient}
+          transientAttack={transientAttack} setTransientAttack={setTransientAttack}
+          transientSustain={transientSustain} setTransientSustain={setTransientSustain}
+          enableAdaptiveEq={enableAdaptiveEq} setEnableAdaptiveEq={setEnableAdaptiveEq}
+          enableDeesser={enableDeesser} setEnableDeesser={setEnableDeesser}
+          enableDeharsh={enableDeharsh} setEnableDeharsh={setEnableDeharsh}
+          enableSaturation={enableSaturation} setEnableSaturation={setEnableSaturation}
+          satDrive={satDrive} setSatDrive={setSatDrive}
+          satMode={satMode} setSatMode={setSatMode}
+          enableSubmono={enableSubmono} setEnableSubmono={setEnableSubmono}
+          enableCrossfeed={enableCrossfeed} setEnableCrossfeed={setEnableCrossfeed}
+          crossfeedAmount={crossfeedAmount} setCrossfeedAmount={setCrossfeedAmount}
+          // New DSP Props
+          enable8D={enable8D} setEnable8D={setEnable8D}
+          motionMode={motionMode} setMotionMode={setMotionMode}
+          motionSpeed={motionSpeed} setMotionSpeed={setMotionSpeed}
+          motionRadius={motionRadius} setMotionRadius={setMotionRadius}
+          stereoWidth={stereoWidth} setStereoWidth={setStereoWidth}
+          bassEnhancer={bassEnhancer} setBassEnhancer={setBassEnhancer}
+          bassIntensity={bassIntensity} setBassIntensity={setBassIntensity}
+          roomMorphing={roomMorphing} setRoomMorphing={setRoomMorphing}
+          lufsMode={lufsMode} setLufsMode={setLufsMode}
+          spatialMode={spatialMode} setSpatialMode={setSpatialMode}
+          genreProfile={genreProfile} setGenreProfile={setGenreProfile}
+          harmonicExciter={harmonicExciter} setHarmonicExciter={setHarmonicExciter}
+          enablePhaseRotation={enablePhaseRotation} setEnablePhaseRotation={setEnablePhaseRotation}
+          enableSpectralGlue={enableSpectralGlue} setEnableSpectralGlue={setEnableSpectralGlue}
+          spectralGlueThreshold={spectralGlueThreshold} setSpectralGlueThreshold={setSpectralGlueThreshold}
+          enableStereoDepth={enableStereoDepth} setEnableStereoDepth={setEnableStereoDepth}
+          stereoDepthAmount={stereoDepthAmount} setStereoDepthAmount={setStereoDepthAmount}
+        />
+      )}
+
+      {showDiagnostics && (
+        <AudioDiagnosticsPanel
+          isOpen={showDiagnostics}
+          onClose={() => setShowDiagnostics(false)}
+          audioContextRef={audioContextRef}
+          analyserRef={analyserRef}
+          masterGainRef={masterGainRef}
+          crossfeedRef={crossfeedRef}
+          stereoWidthRef={stereoWidthRef}
+          exciterNodeRef={exciterNodeRef}
+          limiterRef={masteringRef}
+          occlusionFilterRef={occlusionFilterRef}
+          workletAnchorRef={workletAnchorRef}
+          eqFiltersRef={eqFiltersRef}
         />
       )}
     </>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumina Advanced Audio Tests (Fixed Exciter)</title>
+  <style>
+    body { background: #121212; color: #fff; font-family: monospace; padding: 20px; }
+    .pass { color: #00ff00; }
+    .fail { color: #ff0000; }
+    .log { background: #222; padding: 10px; border-radius: 5px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Lumina DSP Advanced Synthetic Tests v2 (Parallel Exciter)</h2>
+  <div id="status">Running Tests...</div>
+  <pre id="log" class="log"></pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+    const log = (msg, isError=false) => { 
+        logEl.innerHTML += `<span class="${isError?'fail':'pass'}">${msg}</span>\n`; 
+    };
+
+    const getCurve = (amount) => {
+      const n = 256;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i * 2) / n - 1;
+        curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
+      }
+      return curve;
+    };
+
+    function calculateRMS(data) {
+        let sum = 0;
+        for(let i=0; i<data.length; i++) sum += data[i]*data[i];
+        return Math.sqrt(sum / data.length);
+    }
+
+    async function measureRMSOfFrequency(ctx, shaperNode, targetFreq, q=20) {
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = targetFreq;
+        filter.Q.value = q;
+        shaperNode.connect(filter);
+        return filter; // return the node
+    }
+
+    async function runAdvancedTests() {
+      try {
+        log('\n--- 1. THD TEST (Total Harmonic Distortion) ---');
+        log('Injecting 3kHz sine into Exciter (High Freqs) with amount=1.5...');
+        // We use 3kHz because the new exciter has a 2.5kHz High-pass filter.
+        const ctx = new OfflineAudioContext(6, 44100 * 2, 44100);
+        
+        const osc = ctx.createOscillator();
+        osc.frequency.value = 3000;
+        
+        // NEW ARCHITECTURE
+        const exciterSplit = ctx.createGain();
+        const exciterHighpass = ctx.createBiquadFilter();
+        exciterHighpass.type = 'highpass'; 
+        exciterHighpass.frequency.value = 2500;
+        const shaper = ctx.createWaveShaper();
+        shaper.curve = getCurve(1.5);
+        shaper.oversample = '4x';
+        const exciterMerge = ctx.createGain();
+        
+        osc.connect(exciterSplit);
+        exciterSplit.connect(exciterMerge);
+        exciterSplit.connect(exciterHighpass);
+        exciterHighpass.connect(shaper);
+        shaper.connect(exciterMerge);
+        
+        // Measure 3k (Fundamental), 6k (H2), 9k (H3), 12k (H4), 15k (H5)
+        const f1 = await measureRMSOfFrequency(ctx, exciterMerge, 3000, 30);
+        const f2 = await measureRMSOfFrequency(ctx, exciterMerge, 6000, 30);
+        const f3 = await measureRMSOfFrequency(ctx, exciterMerge, 9000, 30);
+        const f4 = await measureRMSOfFrequency(ctx, exciterMerge, 12000, 30);
+        const f5 = await measureRMSOfFrequency(ctx, exciterMerge, 15000, 30);
+        const direct = ctx.createGain(); exciterMerge.connect(direct);
+
+        const merger = ctx.createChannelMerger(6);
+        f1.connect(merger, 0, 0); f2.connect(merger, 0, 1);
+        f3.connect(merger, 0, 2); f4.connect(merger, 0, 3);
+        f5.connect(merger, 0, 4); direct.connect(merger, 0, 5);
+        merger.connect(ctx.destination);
+
+        osc.start();
+        const thdBuffer = await ctx.startRendering();
+        
+        const rmsF1 = calculateRMS(thdBuffer.getChannelData(0));
+        const rmsF2 = calculateRMS(thdBuffer.getChannelData(1));
+        const rmsF3 = calculateRMS(thdBuffer.getChannelData(2));
+        const rmsF4 = calculateRMS(thdBuffer.getChannelData(3));
+        const rmsF5 = calculateRMS(thdBuffer.getChannelData(4));
+        
+        const sumHarmonics = Math.sqrt(rmsF2**2 + rmsF3**2 + rmsF4**2 + rmsF5**2);
+        const thdPercent = (sumHarmonics / rmsF1) * 100;
+        
+        log(`Fundamental (3kHz) RMS: ${rmsF1.toFixed(4)}`);
+        log(`Harmonics RMS: H2(6k):${rmsF2.toFixed(4)} | H3(9k):${rmsF3.toFixed(4)}`);
+        log(`THD: ${thdPercent.toFixed(2)}% (Target: 0.5% - 5%)`);
+        
+        // ------------------
+        log('\n--- 2. INTERMODULATION DISTORTION (IMD) TEST ---');
+        log('Injecting 60Hz + 7000Hz into Parallel High-Pass Exciter...');
+        
+        const ctxImd = new OfflineAudioContext(4, 44100 * 2, 44100);
+        const osc60 = ctxImd.createOscillator(); osc60.frequency.value = 60;
+        const osc7k = ctxImd.createOscillator(); osc7k.frequency.value = 7000;
+        
+        const gain60 = ctxImd.createGain(); gain60.gain.value = 0.8;
+        const gain7k = ctxImd.createGain(); gain7k.gain.value = 0.2;
+        osc60.connect(gain60); osc7k.connect(gain7k);
+        
+        // Parallel Exciter Architecture
+        const exciterSplitIMD = ctxImd.createGain();
+        const exciterHighpassIMD = ctxImd.createBiquadFilter();
+        exciterHighpassIMD.type = 'highpass'; 
+        exciterHighpassIMD.frequency.value = 2500;
+        const shaperIMD = ctxImd.createWaveShaper();
+        shaperIMD.curve = getCurve(1.5);
+        shaperIMD.oversample = '4x';
+        const exciterMergeIMD = ctxImd.createGain();
+        
+        gain60.connect(exciterSplitIMD); gain7k.connect(exciterSplitIMD);
+        exciterSplitIMD.connect(exciterMergeIMD);
+        exciterSplitIMD.connect(exciterHighpassIMD);
+        exciterHighpassIMD.connect(shaperIMD);
+        shaperIMD.connect(exciterMergeIMD);
+        
+        // Measure Carrier(7k), Sideband Lower(6940), Sideband Upper(7060)
+        const f7000 = ctxImd.createBiquadFilter(); f7000.type='bandpass'; f7000.frequency.value=7000; f7000.Q.value=50;
+        const f6940 = ctxImd.createBiquadFilter(); f6940.type='bandpass'; f6940.frequency.value=6940; f6940.Q.value=50;
+        const f7060 = ctxImd.createBiquadFilter(); f7060.type='bandpass'; f7060.frequency.value=7060; f7060.Q.value=50;
+        
+        exciterMergeIMD.connect(f7000); exciterMergeIMD.connect(f6940); exciterMergeIMD.connect(f7060);
+        
+        const mergerImd = ctxImd.createChannelMerger(4);
+        f7000.connect(mergerImd, 0, 0); f6940.connect(mergerImd, 0, 1); f7060.connect(mergerImd, 0, 2);
+        mergerImd.connect(ctxImd.destination);
+        
+        osc60.start(); osc7k.start();
+        const imdBuffer = await ctxImd.startRendering();
+        
+        const rms7000 = calculateRMS(imdBuffer.getChannelData(0));
+        const rms6940 = calculateRMS(imdBuffer.getChannelData(1));
+        const rms7060 = calculateRMS(imdBuffer.getChannelData(2));
+        
+        const imdSum = rms6940 + rms7060;
+        const imdRatio = (imdSum / rms7000) * 100;
+        
+        log(`Carrier (7kHz) RMS: ${rms7000.toFixed(5)}`);
+        log(`Lower Sideband (6.94kHz) RMS: ${rms6940.toFixed(5)}`);
+        log(`Upper Sideband (7.06kHz) RMS: ${rms7060.toFixed(5)}`);
+        log(`IMD Ratio: ${imdRatio.toFixed(2)}%`);
+        
+        if (thdPercent >= 0.5 && thdPercent <= 5.0 && imdRatio < 15.0) {
+            statusEl.innerHTML = '<span class="pass">Advanced Tests Passed! Harmonics are musical and IMD is controlled.</span>';
+        } else {
+            statusEl.innerHTML = '<span class="fail">Advanced Tests Failed! Math violates studio bounds.</span>';
+        }
+
+      } catch (e) {
+        log('Error: ' + e.message, true);
+        statusEl.innerHTML = '<span class="fail">CRASH IN TESTS</span>';
+      }
+    }
+    runAdvancedTests();
+  </script>
+</body>
+</html>

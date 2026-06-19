@@ -1,0 +1,141 @@
+203 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.5
+203 INFO: Python: 3.10.4
+215 INFO: Platform: Windows-10-10.0.19044-SP0
+215 INFO: Python environment: C:\Users\andrey\AppData\Local\Programs\Python\Python310
+219 INFO: Removing temporary files and cleaning cache in C:\Users\andrey\AppData\Local\pyinstaller
+636 INFO: Initializing shazamio_core module
+636 INFO: shazamio_core module initialized successfully
+524 WARNING: Failed to collect submodules for 'numpy.f2py.tests' because importing 'numpy.f2py.tests' raised: ModuleNotFoundError: No module named 'pytest'
+2902 WARNING: Failed to collect submodules for 'torch.utils.tensorboard' because importing 'torch.utils.tensorboard' raised: ModuleNotFoundError: No module named 'tensorboard'
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._sharding_spec` will be deprecated, use `torch.distributed._shard.sharding_spec` instead
+  __import__(name)
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._sharded_tensor` will be deprecated, use `torch.distributed._shard.sharded_tensor` instead
+  __import__(name)
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._shard.checkpoint` will be deprecated, use `torch.distributed.checkpoint` instead
+  __import__(name)
+860 WARNING: Failed to collect submodules for 'spotapi._tests' because importing 'spotapi._tests' raised: ModuleNotFoundError: No module named 'annotations_test'
+29578 WARNING: collect_data_files - skipping data collection for module 'sounddevice' as it is not a package.
+29579 WARNING: collect_dynamic_libs - skipping library collection for module 'sounddevice' as it is not a package.
+30420 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\pyinstaller.exe',
+ 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\python310.zip',
+ 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\DLLs',
+ 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib',
+ 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310',
+ 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages',
+ 'E:\\youtubr\\youtubeMusicDownload-main\\backend']
+36522 INFO: Appending 'binaries' from .spec
+36527 INFO: Appending 'datas' from .spec
+41669 INFO: checking Analysis
+41670 INFO: Building Analysis because Analysis-00.toc is non existent
+41670 INFO: Looking for Python shared library...
+41670 INFO: Using Python shared library: C:\Users\andrey\AppData\Local\Programs\Python\Python310\python310.dll
+41670 INFO: Running Analysis Analysis-00.toc
+41670 INFO: Target bytecode optimization level: 0
+41670 INFO: Initializing module dependency graph...
+41672 INFO: Initializing module graph hook caches...
+41718 INFO: Analyzing modules for base_library.zip ...
+42659 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+42779 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+44458 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+46120 INFO: Caching module dependency graph...
+46228 INFO: Analyzing E:\youtubr\youtubeMusicDownload-main\backend\backend_tray.py
+46249 INFO: Processing standard module hook 'hook-uvicorn.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+46983 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+47198 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+47543 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+48364 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+48403 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+48404 INFO: SetuptoolsInfo: initializing cached setuptools info...
+49337 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+50059 INFO: Processing standard module hook 'hook-websockets.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+50910 INFO: Processing standard module hook 'hook-anyio.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+52190 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\webview\\__pyinstaller'
+52659 INFO: Processing standard module hook 'hook-jinja2.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+53475 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+53666 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\pythonnet\\_pyinstaller'
+53802 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+53932 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54094 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+54101 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+54101 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+54105 INFO: Processing standard module hook 'hook-distutils.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+54211 INFO: Processing standard module hook 'hook-distutils.util.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+54261 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+54295 INFO: Processing standard module hook 'hook-_osx_support.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+54502 INFO: Processing standard module hook 'hook-pkg_resources.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+56826 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+57425 INFO: Processing standard module hook 'hook-pydantic.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+58308 INFO: Processing standard module hook 'hook-rich.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+58760 INFO: Processing standard module hook 'hook-pygments.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+61296 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+62986 INFO: Processing standard module hook 'hook-torch.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+2843 WARNING: Failed to collect submodules for 'torch.utils.tensorboard' because importing 'torch.utils.tensorboard' raised: ModuleNotFoundError: No module named 'tensorboard'
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._sharding_spec` will be deprecated, use `torch.distributed._shard.sharding_spec` instead
+  __import__(name)
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._sharded_tensor` will be deprecated, use `torch.distributed._shard.sharded_tensor` instead
+  __import__(name)
+C:\Users\andrey\AppData\Local\Programs\Python\Python310\lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: DeprecationWarning: `torch.distributed._shard.checkpoint` will be deprecated, use `torch.distributed.checkpoint` instead
+  __import__(name)
+88319 INFO: hook-torch: this torch build does not depend on MKL...
+89056 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+91907 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+107175 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+107280 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+107921 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+109926 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+113774 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
+114420 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+122341 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+122343 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+124332 INFO: Processing standard module hook 'hook-torchaudio.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+134889 INFO: Processing standard module hook 'hook-fsspec.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+135595 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+135815 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+142144 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+156937 INFO: Processing pre-safe-import-module hook 'hook-tensorflow.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
+165878 INFO: Processing standard module hook 'hook-cloudpickle.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+168665 INFO: Processing standard module hook 'hook-dns.rdata.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+172718 INFO: Processing standard module hook 'hook-yt_dlp.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\yt_dlp\\__pyinstaller'
+199 WARNING: Failed to collect submodules for 'urllib3.contrib.emscripten' because importing 'urllib3.contrib.emscripten' raised: ModuleNotFoundError: No module named 'js'
+175452 INFO: Processing standard module hook 'hook-Cryptodome.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+186787 INFO: Processing standard module hook 'hook-sounddevice.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+187238 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+187240 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+188746 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+189231 INFO: Processing standard module hook 'hook-pystray.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+189655 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+189796 INFO: Analyzing hidden import 'uvicorn.loops'
+189797 INFO: Analyzing hidden import 'uvicorn.loops.auto'
+189801 INFO: Analyzing hidden import 'uvicorn.protocols.http.auto'
+189802 INFO: Analyzing hidden import 'uvicorn.protocols.websockets.auto'
+189804 INFO: Analyzing hidden import 'beautifulsoup4'
+189804 ERROR: Hidden import 'beautifulsoup4' not found
+189804 INFO: Analyzing hidden import 'numpy.core.multiarray'
+189806 INFO: Analyzing hidden import 'yt_dlp_plugins'
+189808 INFO: Analyzing hidden import 'demucs.__main__'
+189809 INFO: Analyzing hidden import 'demucs.augment'
+189814 INFO: Analyzing hidden import 'demucs.distrib'
+189818 INFO: Analyzing hidden import 'demucs.ema'
+189821 INFO: Analyzing hidden import 'demucs.evaluate'
+189829 INFO: Analyzing hidden import 'demucs.repitch'
+189833 INFO: Analyzing hidden import 'demucs.solver'
+189854 INFO: Analyzing hidden import 'demucs.train'
+189874 INFO: Analyzing hidden import 'demucs.wdemucs'
+189876 INFO: Analyzing hidden import 'numpy._configtool'
+189877 INFO: Analyzing hidden import 'numpy._core._multiarray_tests'
+189878 INFO: Analyzing hidden import 'numpy._core._operand_flag_tests'
+189878 INFO: Analyzing hidden import 'numpy._core._rational_tests'
+189879 INFO: Analyzing hidden import 'numpy._core._simd'
+189881 INFO: Analyzing hidden import 'numpy._core._struct_ufunc_tests'
+189881 INFO: Analyzing hidden import 'numpy._core._umath_tests'
+189882 INFO: Analyzing hidden import 'numpy._core.cversions'
+189884 INFO: Analyzing hidden import 'numpy._pyinstaller'
+189885 INFO: Analyzing hidden import 'numpy._pyinstaller.hook-numpy'
+189906 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+189946 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'C:\\Users\\andrey\\AppData\\Local\\Programs\\Python\\Python310\\lib\\site-packages\\PyInstaller\\hooks'
+191871 INFO: Analyzing hidden import 'numpy._typing._extended_precision'
+191874 INFO: Analyzing hidden import 'numpy._utils._pep440'
+191889 INFO: Analyzing hidden import 'numpy.compat'
+191895 INFO: Analyzing hidden import 'numpy.compat.tests'
+191896 INFO: Analyzing hidden import 'numpy.conftest'

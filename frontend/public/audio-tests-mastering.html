@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumina Mastering Engine Synthetic Test</title>
+  <style>
+    body { background: #121212; color: #fff; font-family: monospace; padding: 20px; }
+    .pass { color: #00ff00; }
+    .fail { color: #ff0000; }
+    .log { background: #222; padding: 10px; border-radius: 5px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Lumina Mastering Engine - Anti-Clipping Synthetic Test</h2>
+  <div id="status">Running Tests...</div>
+  <pre id="log" class="log"></pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+    const log = (msg, isError=false) => {
+      logEl.innerHTML += `<span class="${isError?'fail':'pass'}">${msg}</span>\n`;
+    };
+
+    async function runTest() {
+      try {
+        log('Initializing OfflineAudioContext (44100Hz, 5 seconds)...');
+        // Render 5 seconds of audio
+        const ctx = new OfflineAudioContext(2, 44100 * 5, 44100);
+
+        log('Loading Lumina Mastering Worklet...');
+        await ctx.audioWorklet.addModule('/lumina-mastering.js');
+
+        // Create the ultimate destroyer source: 
+        // 1. Oscillator at 50Hz (sub bass)
+        // 2. White Noise (high frequencies)
+        // 3. +24 dB Gain (guaranteed to destroy any speaker without a limiter)
+        
+        const osc = ctx.createOscillator();
+        osc.frequency.value = 50;
+        
+        const bufferSize = 44100 * 5;
+        const noiseBuffer = ctx.createBuffer(2, bufferSize, 44100);
+        for(let ch=0; ch<2; ch++){
+            const data = noiseBuffer.getChannelData(ch);
+            for(let i=0; i<bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        }
+        const noiseSrc = ctx.createBufferSource();
+        noiseSrc.buffer = noiseBuffer;
+
+        const extremeGain = ctx.createGain();
+        extremeGain.gain.value = 15.8; // +24dB
+
+        const masteringNode = new AudioWorkletNode(ctx, 'lumina-mastering');
+
+        // Connect chain
+        osc.connect(extremeGain);
+        noiseSrc.connect(extremeGain);
+        extremeGain.connect(masteringNode);
+        masteringNode.connect(ctx.destination);
+
+        osc.start();
+        noiseSrc.start();
+
+        log('Rendering offline audio graph...');
+        const renderedBuffer = await ctx.startRendering();
+        
+        log('Analyzing rendered samples...');
+        let maxPeak = 0;
+        let clippedSamples = 0;
+
+        for (let ch = 0; ch < renderedBuffer.numberOfChannels; ch++) {
+          const data = renderedBuffer.getChannelData(ch);
+          for (let i = 0; i < data.length; i++) {
+            const absVal = Math.abs(data[i]);
+            if (absVal > maxPeak) maxPeak = absVal;
+            if (absVal > 1.0) clippedSamples++;
+          }
+        }
+
+        const peakDB = 20 * Math.log10(maxPeak);
+        log(`\n--- RESULTS ---`);
+        log(`Max True Peak: ${maxPeak.toFixed(6)} (${peakDB.toFixed(2)} dBFS)`);
+        log(`Clipped Samples (> 1.0): ${clippedSamples}`);
+
+        if (clippedSamples === 0 && maxPeak <= 1.0) {
+          statusEl.innerHTML = '<span class="pass">TEST PASSED: Lumina Mastering Engine prevented 100% of clipping!</span>';
+          log(`\nSUCCESS: Even with +24dB of Gain and extreme bass, the engine contained the signal perfectly.`);
+        } else {
+          statusEl.innerHTML = '<span class="fail">TEST FAILED: Audio Clipped!</span>';
+          log(`\nFAILURE: The mastering engine allowed audio to exceed 0dBFS.`, true);
+        }
+
+      } catch (err) {
+        statusEl.innerHTML = '<span class="fail">TEST CRASHED!</span>';
+        log(`Error: ${err.message}`, true);
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

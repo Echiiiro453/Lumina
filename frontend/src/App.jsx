@@ -3,8 +3,9 @@ import BackgroundMedia from './components/BackgroundMedia';
 import TopAppBar from './components/TopAppBar';
 import QueueDrawer from './components/QueueDrawer';
 import SpotifyModal from './components/SpotifyModal';
+import BatchDownloadModal from './components/BatchDownloadModal';
 import { t, getLanguage, setLanguage } from './i18n';
-import { Search, Download, Music, AlertCircle, CheckCircle, ArrowRight, ArrowRightLeft, Settings, Upload, FileText, Check, Scissors, Sliders, X, List, Trash2, Plus, PlayCircle, Minimize2, Save, FolderOpen, AlertTriangle, Info, Power, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Heart, Copy, Github, RefreshCw, Wand2, Clock, Menu, Mic, Smartphone, BellRing, ClipboardPaste } from 'lucide-react';
+import { Search, Download, Music, AlertCircle, CheckCircle, ArrowRight, ArrowRightLeft, Settings, Upload, FileText, Check, Scissors, Sliders, X, List, Trash2, Plus, PlayCircle, Minimize2, Save, FolderOpen, AlertTriangle, Info, Power, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Heart, Copy, Github, RefreshCw, Wand2, Clock, Menu, Mic, Smartphone, BellRing, ClipboardPaste, ListPlus } from 'lucide-react';
 import { RippleButton } from './components/Ripple';
 import { QueueItem } from './components/QueueItem';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -68,6 +69,10 @@ function App() {
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [videoCodec, setVideoCodec] = useState('auto');
   const [compressVideo, setCompressVideo] = useState(false);
+  const [trimEnabled, setTrimEnabled] = useState(false);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [spatialAudio, setSpatialAudio] = useState(false);
   const [downloadInfo, setDownloadInfo] = useState(null);
 
   // Auto-detect mode when URL changes
@@ -216,6 +221,7 @@ function App() {
 
   // Playlist Manager
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
+  const [showBatchModal, setShowBatchModal] = useState(false);
   const [playlistVideos, setPlaylistVideos] = useState([]);
   const [selectedVideos, setSelectedVideos] = useState(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
@@ -677,6 +683,55 @@ function App() {
     }, 500);
   };
 
+  const handleBatchEnqueue = (urlsList) => {
+    if (urlsList.length === 0) return;
+
+    // --- COOKIE ENFORCEMENT ---
+    if (!isAuthenticated) {
+      const confirmUpload = window.confirm(
+        `⚠️ ATENÇÃO: Você está tentando iniciar downloads sem login (sem cookies.txt).\n\n` +
+        `Isso tem uma alta chance de resultar em erros no download ou banimento/bloqueio temporário do seu IP pelo YouTube.\n\n` +
+        `Clique em OK para enviar seus cookies agora (Recomendado), ou CANCELAR para prosseguir por sua conta e risco.`
+      );
+
+      if (confirmUpload) {
+        setShowSettings(true);
+        return;
+      }
+    }
+    // ---------------------------
+
+    const queueItems = urlsList.map((url, idx) => {
+      const displayTitle = url.length > 50 ? url.substring(0, 50) + '...' : url;
+      return {
+        id: undefined,
+        title: displayTitle,
+        thumbnail: null,
+        uploader: 'Lote',
+        duration_string: '—',
+        url: url,
+        uniqueId: Date.now() + Math.random() + idx,
+        pitch: mode === 'audio' ? pitch : 0,
+        speed: mode === 'audio' ? speed : 1.0,
+        subtitle: mode === 'video' ? subtitle : 'none',
+        status: 'pending',
+        progress: 0,
+        addedAt: Date.now()
+      };
+    });
+
+    setQueue(prev => [...prev, ...queueItems]);
+    setShowQueue(true);
+
+    addToast(t('batchAddedToast') ? t('batchAddedToast').replace('x', queueItems.length) : `${queueItems.length} links adicionados à fila!`, 'success');
+
+    // Tentar iniciar automaticamente após render
+    setTimeout(() => {
+      const startBtn = document.getElementById('start-downloads-btn');
+      if (startBtn) startBtn.click();
+    }, 500);
+  };
+
   // ===== REDOWNLOAD LOGIC =====
   const executeRetry = async (video, playlistId) => {
     try {
@@ -871,7 +926,10 @@ function App() {
         artist: item.uploader,
         cover_path: item.thumbnail,
         playlist_id: item.playlist_id, // For DB persistence
-        video_id: item.id              // For DB persistence
+        video_id: item.id,             // For DB persistence
+        start_time: trimEnabled && startTime ? startTime : null,
+        end_time: trimEnabled && endTime ? endTime : null,
+        spatial_audio: spatialAudio
       });
 
       const { job_id } = startRes.data;
@@ -1005,7 +1063,10 @@ function App() {
         subtitle: mode === 'video' ? subtitle : 'none',
         playlist: false,
         pitch: mode === 'audio' ? pitch : 0,
-        speed: mode === 'audio' ? speed : 1.0
+        speed: mode === 'audio' ? speed : 1.0,
+        start_time: trimEnabled && startTime ? startTime : null,
+        end_time: trimEnabled && endTime ? endTime : null,
+        spatial_audio: spatialAudio
       });
 
       const { job_id } = response.data;
@@ -1344,6 +1405,16 @@ function App() {
                 >
                   <Music size={18} />
                   <span className="hidden sm:inline">Importar Playlist</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowBatchModal(true)}
+                  className="sm:flex-none h-12 px-6 rounded-full bg-surface-container border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-medium transition-all flex items-center justify-center gap-2 hover:scale-[1.02]"
+                  title={t('batchDownloadTitle') || 'Baixar em Lote'}
+                >
+                  <ListPlus size={18} />
+                  <span className="hidden sm:inline">{t('batchDownload') || 'Baixar em Lote'}</span>
                 </button>
               </div>
             </motion.form>
@@ -1698,11 +1769,75 @@ function App() {
                             <span className="text-sm font-bold text-on-surface block">Compressão Otimizada</span>
                             <span className="text-[10px] text-on-surface-variant">Re-codifica para o menor tamanho possível via FFmpeg</span>
                           </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" checked={compressVideo} onChange={(e) => setCompressVideo(e.target.checked)} />
-                            <div className="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-surface after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                          </label>
+                          <button
+                            onClick={() => setCompressVideo(!compressVideo)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${compressVideo ? 'bg-primary' : 'bg-surface-variant'}`}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${compressVideo ? 'translate-x-4' : 'translate-x-1'}`} />
+                          </button>
                         </div>
+                        
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-outline-variant/20">
+                          <div>
+                            <span className="text-sm font-bold text-on-surface block flex items-center gap-1"><Scissors size={14} /> Recortar (Trim)</span>
+                            <span className="text-[10px] text-on-surface-variant">Baixa o arquivo todo e corta localmente depois</span>
+                          </div>
+                          <button
+                            onClick={() => setTrimEnabled(!trimEnabled)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${trimEnabled ? 'bg-primary' : 'bg-surface-variant'}`}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${trimEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
+                          </button>
+                        </div>
+
+                        {mode === 'audio' && (
+                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-outline-variant/20">
+                            <div>
+                              <span className="text-sm font-bold text-on-surface block flex items-center gap-1">🎧 Áudio Espacial (8D)</span>
+                              <span className="text-[10px] text-on-surface-variant">Filtro Ambisonics Binaural e Reverb aplicado no FLAC/MP3 baixado</span>
+                            </div>
+                            <button
+                              onClick={() => setSpatialAudio(!spatialAudio)}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${spatialAudio ? 'bg-primary' : 'bg-surface-variant'}`}
+                            >
+                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${spatialAudio ? 'translate-x-4' : 'translate-x-1'}`} />
+                            </button>
+                          </div>
+                        )}
+                        
+                        <AnimatePresence>
+                          {trimEnabled && (
+                            <motion.div 
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden mt-3 flex gap-2"
+                            >
+                              <div className="flex-1">
+                                <label className="text-[10px] font-bold text-secondary uppercase px-1">Início (Opcional)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="00:00" 
+                                  value={startTime}
+                                  onChange={(e) => setStartTime(e.target.value)}
+                                  className="w-full mt-1 bg-surface-container border border-outline-variant/30 rounded-lg px-3 py-2 text-on-surface text-sm focus:border-primary outline-none"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-[10px] font-bold text-secondary uppercase px-1">Fim (Opcional)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="01:30" 
+                                  value={endTime}
+                                  onChange={(e) => setEndTime(e.target.value)}
+                                  className="w-full mt-1 bg-surface-container border border-outline-variant/30 rounded-lg px-3 py-2 text-on-surface text-sm focus:border-primary outline-none"
+                                />
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        
+
                       </div>
                     )}
                     
@@ -2020,6 +2155,12 @@ function App() {
       <SubscriptionsModal
         isOpen={showSubscriptionsModal}
         onClose={() => setShowSubscriptionsModal(false)}
+      />
+
+      <BatchDownloadModal
+        isOpen={showBatchModal}
+        onClose={() => setShowBatchModal(false)}
+        onConfirm={handleBatchEnqueue}
       />
     </div>
       {/* New Converter Modal */}
