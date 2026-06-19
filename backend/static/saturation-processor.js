@@ -188,9 +188,13 @@ class SaturationProcessor extends AudioWorkletProcessor {
       this.pinkB0 = new Float32Array(chs);
       this.pinkB1 = new Float32Array(chs);
       this.pinkB2 = new Float32Array(chs);
+      
+      this.dcBlockX = new Float32Array(chs);
+      this.dcBlockY = new Float32Array(chs);
+      this.fastRmsIn = new Float32Array(chs);
     }
 
-    const rmsCoeff = 0.99999;  // Slow integration constant (tau ~ 2.2s) to prevent feedback loops
+    const rmsCoeff = 0.99999;  // Slow integration constant (tau ~ 2.2s)
     const biasCoeff = 0.9997; // Time constant ~ 80ms for grid bias shift recovery
 
     for (let ch = 0; ch < chs; ch++) {
@@ -211,6 +215,9 @@ class SaturationProcessor extends AudioWorkletProcessor {
         // Safeguard original input for clean dry mix path
         const xOrigSafe = (isNaN(xOrig) || !isFinite(xOrig)) ? 0.0 : xOrig;
         let x = xOrigSafe;
+
+        // Fast RMS for instant noise gating (tau ~ 2ms)
+        this.fastRmsIn[ch] = this.fastRmsIn[ch] * 0.99 + (xOrigSafe * xOrigSafe) * 0.01;
 
         // --- Denormal Protection & Silence Flush Gate ---
         if (Math.abs(x) < 1e-7 && this.rmsIn[ch] < 1e-6) {
@@ -367,18 +374,24 @@ class SaturationProcessor extends AudioWorkletProcessor {
           const hfCoupling = Math.tanh(Math.abs(M) / 0.05) * crossCoupling;
           const hfNoiseLevel = 2e-5 * this.drive * hfCoupling;
 
-          // Gating noise floor by RMS to prevent AGC amplification during silence
-          const noiseGate = Math.tanh(this.rmsIn[ch] * 1000.0);
+          // Gating noise floor by FAST RMS to prevent 2-second AGC amplification during silence
+          const noiseGate = Math.tanh(this.fastRmsIn[ch] * 5000.0);
           const tapeNoise = (lfN * lfNoiseLevel + hfN * hfNoiseLevel + barkhausenNoise) * noiseGate;
           
           xFeed = M + tapeNoise;
         }
 
-        const saturated = xFeed;
+        // DC Blocker (Simulates Playback Head Inductive Derivative)
+        // Eliminates Weiss Coupling Spontaneous Magnetization DC offset
+        const dcBlocked = xFeed - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch];
+        this.dcBlockX[ch] = xFeed;
+        this.dcBlockY[ch] = dcBlocked;
+
+        const saturated = dcBlocked;
         outCh[i] = saturated * this.mix + xOrigSafe * (1 - this.mix);
         
         // Track RMS of the clean saturated signal (ignoring noise) to prevent bias loop
-        const pureOutput = (this.mode === 'tape' && typeof M !== 'undefined') ? (outCh[i] - xFeed * this.mix + M * this.mix) : outCh[i];
+        const pureOutput = (this.mode === 'tape' && typeof M !== 'undefined') ? (outCh[i] - dcBlocked * this.mix + (M - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch]) * this.mix) : outCh[i];
         this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
         
         const d1 = xFeed - x1;
