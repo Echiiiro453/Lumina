@@ -6,7 +6,8 @@
 class DeEsserProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
+    this.active = false;
+        const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
     // Detection BPF centered at 6kHz, Q=2.5
     const fc = 6000, Q = 2.5;
@@ -32,6 +33,7 @@ class DeEsserProcessor extends AudioWorkletProcessor {
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
+      if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.threshold !== undefined) this.threshold = e.data.threshold;
     };
   }
@@ -44,6 +46,13 @@ class DeEsserProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
+    if (!this.active) {
+      if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
+        outputs[0][0].set(inputs[0][0]);
+        if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
+      }
+      return true;
+    }
     const input = inputs[0], output = outputs[0];
     if (!input || !input[0]) return true;
 

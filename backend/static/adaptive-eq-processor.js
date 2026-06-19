@@ -10,6 +10,8 @@
 class AdaptiveEQProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.active = false;
+    this.port.onmessage = (e) => { if (e.data.active !== undefined) this.active = !!e.data.active; };
 
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
@@ -74,6 +76,13 @@ class AdaptiveEQProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
+    if (!this.active) {
+      if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
+        outputs[0][0].set(inputs[0][0]);
+        if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
+      }
+      return true;
+    }
     const input  = inputs[0];
     const output = outputs[0];
 

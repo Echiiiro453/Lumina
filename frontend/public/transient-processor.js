@@ -11,7 +11,8 @@
 class TransientShaperProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-
+    this.active = false;
+    
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
     // Fast Envelope: Attack = 1.0ms, Release = 20.0ms
@@ -31,12 +32,20 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
     this.sustainAmount = 0.0; // -1.0 a 1.0
 
     this.port.onmessage = (e) => {
+      if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.attackAmount  !== undefined) this.attackAmount  = e.data.attackAmount;
       if (e.data.sustainAmount !== undefined) this.sustainAmount = e.data.sustainAmount;
     };
   }
 
   process(inputs, outputs) {
+    if (!this.active) {
+      if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
+        outputs[0][0].set(inputs[0][0]);
+        if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
+      }
+      return true;
+    }
     const input  = inputs[0];
     const output = outputs[0];
 

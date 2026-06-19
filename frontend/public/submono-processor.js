@@ -8,7 +8,8 @@
 class SubMonoProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
+    this.active = false;
+        const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     const fc = 80, Q = 0.707;
     const w0 = 2 * Math.PI * fc / sr;
     const cosW0 = Math.cos(w0), alpha = Math.sin(w0) / (2 * Q);
@@ -40,6 +41,7 @@ class SubMonoProcessor extends AudioWorkletProcessor {
     this.harmSvfR = new Float32Array(2);
     
     this.port.onmessage = (e) => {
+      if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.bassRecovery !== undefined) {
         this.bassRecovery = Math.max(0, Math.min(e.data.bassRecovery, 2.0));
       }
@@ -54,6 +56,13 @@ class SubMonoProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
+    if (!this.active) {
+      if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
+        outputs[0][0].set(inputs[0][0]);
+        if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
+      }
+      return true;
+    }
     const input = inputs[0], output = outputs[0];
     if (!input || input.length < 2 || !output || !output[0]) {
       if (input && input[0] && output && output[0]) output[0].set(input[0]);

@@ -40,6 +40,7 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     
     this.port.onmessage = (e) => {
       if (e.data.active !== undefined) this.active = !!e.data.active;
+      if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.threshold !== undefined) this.threshold = Math.max(0.001, Math.min(e.data.threshold, 0.5));
       if (e.data.sensitivity !== undefined) this.sensitivity = Math.max(0.1, Math.min(e.data.sensitivity, 10.0));
     };

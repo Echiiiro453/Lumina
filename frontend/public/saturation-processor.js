@@ -212,6 +212,24 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const xOrigSafe = (isNaN(xOrig) || !isFinite(xOrig)) ? 0.0 : xOrig;
         let x = xOrigSafe;
 
+        // --- Denormal Protection & Silence Flush Gate ---
+        // Se a entrada e a energia do canal forem silêncio absoluto, zera estados críticos
+        // Isso evita Subnormal Float operations que travam a CPU (gerando bips de buffer)
+        // e também quebra qualquer Limit Cycle Oscillation do acoplamento Weiss.
+        if (Math.abs(x) < 1e-7 && this.rmsIn[ch] < 1e-6) {
+          this.magState1[ch] = 0.0;
+          this.magState2[ch] = 0.0;
+          this.magState3[ch] = 0.0;
+          this.magState4[ch] = 0.0;
+          this.magState5[ch] = 0.0;
+          this.prevH[ch] = 0.0;
+          this.biasState[ch] = 0.0;
+          this.lfNoiseState[ch] = 0.0;
+          this.rmsOut[ch] *= 0.9; // decay the output RMS too
+          outCh[i] = 0.0;
+          continue; // Pula cálculos pesados (tanh, etc)
+        }
+
         // Differentiable Soft Input Bounding (Ceiling of 10.0)
         x = 10.0 * Math.tanh(x / 10.0);
 

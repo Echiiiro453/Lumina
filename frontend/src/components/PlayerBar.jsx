@@ -97,7 +97,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   // --- Missing / New DSP States & Refs ---
   const masterGainRef = useRef(null);
   const [enable8D, setEnable8D] = useState(false);
-  const [motionMode, setMotionMode] = useState('Parado');
+  const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
   const [motionRadius, setMotionRadius] = useState(2.0);
   const [stereoWidth, setStereoWidth] = useState('Natural');
@@ -346,6 +346,30 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [enableStereoDepth, stereoDepthAmount]);
 
+  useEffect(() => {
+    if (transientRef.current) transientRef.current.port.postMessage({ active: enableTransient });
+  }, [enableTransient]);
+
+  useEffect(() => {
+    if (adaptiveEqRef.current) adaptiveEqRef.current.port.postMessage({ active: enableAdaptiveEq });
+  }, [enableAdaptiveEq]);
+
+  useEffect(() => {
+    if (deesserRef.current) deesserRef.current.port.postMessage({ active: enableDeesser });
+  }, [enableDeesser]);
+
+  useEffect(() => {
+    if (deharshRef.current) deharshRef.current.port.postMessage({ active: enableDeharsh });
+  }, [enableDeharsh]);
+
+  useEffect(() => {
+    if (saturationRef.current) saturationRef.current.port.postMessage({ active: enableSaturation });
+  }, [enableSaturation]);
+
+  useEffect(() => {
+    if (submonoRef.current) submonoRef.current.port.postMessage({ active: enableSubmono });
+  }, [enableSubmono]);
+
   // 8D Audio Motion System Loop
   useEffect(() => {
     if (!enable8D || motionMode === 'Parado') {
@@ -493,63 +517,58 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         }
       };
 
-      if (enableTransient) {
-        await loadModule('/transient-processor.js');
-        const transientNode = new AudioWorkletNode(audioCtx, 'transient-shaper');
-        transientNode.port.postMessage({ attackAmount: transientAttack, sustainAmount: transientSustain });
-        transientRef.current = transientNode;
-        currentNode.connect(transientNode);
-        currentNode = transientNode;
-      }
-      if (enableAdaptiveEq) {
-        await loadModule('/adaptive-eq-processor.js');
-        const adaptiveEqNode = new AudioWorkletNode(audioCtx, 'adaptive-eq');
-        adaptiveEqRef.current = adaptiveEqNode;
-        currentNode.connect(adaptiveEqNode);
-        currentNode = adaptiveEqNode;
-      }
-      if (enableDeesser) {
-        await loadModule('/deesser-processor.js');
-        const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
-        deesserRef.current = deesserNode;
-        currentNode.connect(deesserNode);
-        currentNode = deesserNode;
-      }
-      if (enableDeharsh) {
-        await loadModule('/deharsh-processor.js');
-        const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
-        deharshRef.current = deharshNode;
-        currentNode.connect(deharshNode);
-        currentNode = deharshNode;
-      }
-      if (enableSaturation) {
-        await loadModule('/saturation-processor.js');
-        const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
-        saturationNode.port.postMessage({ mode: satMode, drive: satDrive, mix: 1.0 });
-        saturationRef.current = saturationNode;
-        currentNode.connect(saturationNode);
-        currentNode = saturationNode;
-      }
-      if (enableSubmono) {
-        await loadModule('/submono-processor.js');
-        const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
-        submonoRef.current = submonoNode;
-        currentNode.connect(submonoNode);
-        currentNode = submonoNode;
-      }
-      if (enableCrossfeed) {
-        await loadModule('/crossfeed-processor.js');
-        const crossfeedNode = new AudioWorkletNode(audioCtx, 'crossfeed');
-        crossfeedNode.port.postMessage({ crossfeedAmount });
-        // Simulating the object format AudioDiagnosticsPanel expects: { cfGainLR, cfGainRL }
-        crossfeedRef.current = { 
-          cfGainLR: { gain: { value: crossfeedAmount } }, 
-          cfGainRL: { gain: { value: crossfeedAmount } },
-          node: crossfeedNode 
-        }; 
-        currentNode.connect(crossfeedNode);
-        currentNode = crossfeedNode;
-      }
+      await loadModule('/transient-processor.js');
+      const transientNode = new AudioWorkletNode(audioCtx, 'transient-shaper');
+      transientNode.port.postMessage({ active: enableTransient, attackAmount: transientAttack, sustainAmount: transientSustain });
+      transientRef.current = transientNode;
+      currentNode.connect(transientNode);
+      currentNode = transientNode;
+
+      await loadModule('/adaptive-eq-processor.js');
+      const adaptiveEqNode = new AudioWorkletNode(audioCtx, 'adaptive-eq');
+      adaptiveEqNode.port.postMessage({ active: enableAdaptiveEq });
+      adaptiveEqRef.current = adaptiveEqNode;
+      currentNode.connect(adaptiveEqNode);
+      currentNode = adaptiveEqNode;
+
+      await loadModule('/deesser-processor.js');
+      const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
+      deesserNode.port.postMessage({ active: enableDeesser });
+      deesserRef.current = deesserNode;
+      currentNode.connect(deesserNode);
+      currentNode = deesserNode;
+
+      await loadModule('/deharsh-processor.js');
+      const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
+      deharshNode.port.postMessage({ active: enableDeharsh });
+      deharshRef.current = deharshNode;
+      currentNode.connect(deharshNode);
+      currentNode = deharshNode;
+
+      await loadModule('/saturation-processor.js');
+      const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
+      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 1.0 });
+      saturationRef.current = saturationNode;
+      currentNode.connect(saturationNode);
+      currentNode = saturationNode;
+
+      await loadModule('/submono-processor.js');
+      const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
+      submonoNode.port.postMessage({ active: enableSubmono });
+      submonoRef.current = submonoNode;
+      currentNode.connect(submonoNode);
+      currentNode = submonoNode;
+
+      await loadModule('/crossfeed-processor.js');
+      const crossfeedNode = new AudioWorkletNode(audioCtx, 'crossfeed');
+      crossfeedNode.port.postMessage({ active: enableCrossfeed, crossfeedAmount });
+      crossfeedRef.current = { 
+        cfGainLR: { gain: { value: enableCrossfeed ? crossfeedAmount : 0 } }, 
+        cfGainRL: { gain: { value: enableCrossfeed ? crossfeedAmount : 0 } },
+        node: crossfeedNode 
+      }; 
+      currentNode.connect(crossfeedNode);
+      currentNode = crossfeedNode;
 
       currentNode.connect(postNode);
 
