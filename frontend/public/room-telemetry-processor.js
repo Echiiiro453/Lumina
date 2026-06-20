@@ -12,6 +12,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     this.preDelayMs = 0;
     this.rt60 = 0;
     this.wetMix = 0.0;
+    this.wetWidth = 0.80;
     this.active = true;
 
     this._frames = 0;
@@ -43,6 +44,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       if (d.preDelayMs !== undefined) this.preDelayMs = toFiniteNumber(d.preDelayMs, this.preDelayMs);
       if (d.rt60 !== undefined) this.rt60 = toFiniteNumber(d.rt60, this.rt60);
       if (d.wetMix !== undefined) this.wetMix = Math.min(1, Math.max(0, toFiniteNumber(d.wetMix, this.wetMix)));
+      if (d.wetWidth !== undefined) this.wetWidth = Math.min(2.0, Math.max(0, toFiniteNumber(d.wetWidth, this.wetWidth)));
       if (d.active !== undefined) this.active = !!d.active;
     };
   }
@@ -97,12 +99,12 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         const d = dryCh ? dryCh[i] : 0.0;
         const w = wetCh ? wetCh[i] : 0.0;
 
-        // Proteção de Largura Estéreo no Reverb (Width: 0.80)
+        // Proteção de Largura Estéreo no Reverb (Largura Dinâmica)
         let fW_L = w;
         let fW_R = w;
         if (output.length > 1) {
            const wMid = (wL + wR) * 0.5;
-           const wSide = (wL - wR) * 0.5 * 0.80; // Corta side em 20%
+           const wSide = (wL - wR) * 0.5 * this.wetWidth;
            fW_L = wMid + wSide;
            fW_R = wMid - wSide;
         }

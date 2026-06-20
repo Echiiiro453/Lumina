@@ -322,12 +322,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [playbackRate, preservesPitch, currentSong]);
 
   const ROOM_PRESETS = {
-    "Estúdio": { preDelayMs: 8, rt60: 0.8, wetMix: 0.10 },
-    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.16 },
-    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12 },
-    "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15 },
-    "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08 },
-    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.14 }
+    "Estúdio": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70 },
+    "Club": { preDelayMs: 12, rt60: 1.2, wetMix: 0.11, wetWidth: 0.80 },
+    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.16, wetWidth: 0.85 },
+    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90 },
+    "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15, wetWidth: 0.85 },
+    "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65 },
+    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.14, wetWidth: 0.95 }
   };
 
   useEffect(() => {
@@ -344,6 +345,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          preset: spatialMode,
          preDelayMs: currentPreset.preDelayMs,
          rt60: currentPreset.rt60,
+         wetWidth: currentPreset.wetWidth,
          active: true
       });
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
