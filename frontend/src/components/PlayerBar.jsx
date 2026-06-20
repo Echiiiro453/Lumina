@@ -427,6 +427,16 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [enable8D]);
 
+  useEffect(() => {
+    if (panner8DRef.current && panner8DRef.current.port) {
+      panner8DRef.current.port.postMessage({
+        motionMode: motionMode,
+        radiusM: motionRadius,
+        speed: motionSpeed
+      });
+    }
+  }, [motionMode, motionRadius, motionSpeed]);
+
   // 8D Audio Motion System Loop
   useEffect(() => {
     if (!enable8D || motionMode === 'Parado') {

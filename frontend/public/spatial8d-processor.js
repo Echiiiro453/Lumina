@@ -49,8 +49,19 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
     this._sumOutL = 0; this._sumOutR = 0; this._sumOutLR = 0;
     this._sumMidIn = 0; this._sumSideIn = 0;
     this._sumMidOut = 0; this._sumSideOut = 0;
+    this._sumMidMotion = 0; this._sumSideMotion = 0;
     this._sumDiff = 0;
     this._peakOut = 0;
+    
+    this.motionMode = "none";
+    this.radiusM = 0;
+    this.speed = 0;
+    
+    this.port.onmessage = (e) => {
+      if (e.data.motionMode !== undefined) this.motionMode = e.data.motionMode;
+      if (e.data.radiusM !== undefined) this.radiusM = e.data.radiusM;
+      if (e.data.speed !== undefined) this.speed = e.data.speed;
+    };
   }
 
   _biquad(sample, c, z) {
@@ -144,11 +155,14 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       
       // Protect Center: Mid signal remains untouched, processing is applied mainly to Side
       const mid = (L + R) * 0.5;
-      const sideL = L - mid;
-      const sideR = R - mid;
+      const sideIn = (L - R) * 0.5;
       
-      const procL = mid + (shadowL - mid);
-      const procR = mid + (shadowR - mid);
+      const shadowMid = (shadowL + shadowR) * 0.5;
+      const shadowSideL = shadowL - shadowMid;
+      const shadowSideR = shadowR - shadowMid;
+      
+      const procL = mid + shadowSideL;
+      const procR = mid + shadowSideR;
       
       const finalL = L * (1.0 - wet) + procL * wet;
       const finalR = R * (1.0 - wet) + procR * wet;
@@ -171,9 +185,12 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       const sideOut = (finalL - finalR) * 0.5;
       
       this._sumMidIn += mid * mid;
-      this._sumSideIn += (L - R) * 0.5 * (L - R) * 0.5;
+      this._sumSideIn += sideIn * sideIn;
       this._sumMidOut += midOut * midOut;
       this._sumSideOut += sideOut * sideOut;
+      
+      this._sumMidMotion += (midOut - mid) * (midOut - mid);
+      this._sumSideMotion += (sideOut - sideIn) * (sideOut - sideIn);
       
       this._sumDiff += (finalL - L) * (finalL - L) + (finalR - R) * (finalR - R);
       
@@ -201,6 +218,8 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       const centerDrift = Math.abs(outL_rms - outR_rms);
       
       const diffRMS = Math.sqrt(this._sumDiff / (N * 2));
+      const midMotionRMS = Math.sqrt(this._sumMidMotion / N);
+      const sideMotionRMS = Math.sqrt(this._sumSideMotion / N);
       
       // Mono Compatibility Loss
       const inMonoEnergy = Math.sqrt(this._sumMidIn / N) + 1e-12;
@@ -212,6 +231,10 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       this.port.postMessage({
         type: 'telemetry',
         name: 'Spatial8D',
+        mode: this.motionMode,
+        azimuthDeg: panAngle.toFixed(0),
+        radiusM: this.radiusM.toFixed(1),
+        speed: this.speed.toFixed(2) + 'x',
         inputCorr: inCorr.toFixed(2),
         outputCorr: outCorr.toFixed(2),
         midEnergy: midEnergy.toFixed(3),
@@ -221,6 +244,8 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
         itdUs: itdUs.toFixed(0),
         wet: wet.toFixed(2),
         diffRMS: diffRMS.toFixed(3),
+        midMotion: midMotionRMS.toFixed(4),
+        sideMotion: sideMotionRMS.toFixed(4),
         monoLossDb: monoLossDb.toFixed(1),
         outputPeak: outputPeakDb.toFixed(1) + 'dB'
       });
@@ -231,6 +256,7 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       this._sumOutL = 0; this._sumOutR = 0; this._sumOutLR = 0;
       this._sumMidIn = 0; this._sumSideIn = 0;
       this._sumMidOut = 0; this._sumSideOut = 0;
+      this._sumMidMotion = 0; this._sumSideMotion = 0;
       this._sumDiff = 0;
       this._peakOut = 0;
     }
