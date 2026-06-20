@@ -76,10 +76,10 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     
     // Trackers para o bloco atual
     let blockMaxAmp = 0;
-    let blockPowerSum = 0;
     const sampleCount = inL.length;
     let minK = 1.0;
     let sumBand = 0;
+    let maxEnv = 0;
     
     for (let i = 0; i < sampleCount; i++) {
       const L = inL[i];
@@ -114,6 +114,8 @@ class DeHarshProcessor extends AudioWorkletProcessor {
       } else {
         this.env = this.currReleaseCoeff * this.env + (1.0 - this.currReleaseCoeff) * rect;
       }
+      
+      if (this.env > maxEnv) maxEnv = this.env;
       
       // 4. Calcular ganho dinâmico do Notch (K)
       let K = 1.0;
@@ -158,23 +160,27 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     if (this.active) {
       this._dbgBand = (this._dbgBand || 0) + sumBand;
       this._dbgMinK = Math.min(this._dbgMinK || 1.0, minK);
+      this._dbgMaxEnv = Math.max(this._dbgMaxEnv || 0, maxEnv);
       this._telemetryCount = (this._telemetryCount || 0) + 1;
       
       if (this._telemetryCount >= 60) {
-        const samples = 60 * sampleCount;
-        const bandRMS = Math.sqrt(this._dbgBand / samples);
+        const peakEnv = this._dbgMaxEnv;
+        const overshoot = Math.max(0, peakEnv - this.threshold);
         const dynamicCutDb = 20 * Math.log10(this._dbgMinK + 1e-12);
         
         this.port.postMessage({
           type: 'telemetry',
           name: 'DeHarsh',
-          bandRMS: bandRMS.toFixed(3),
+          peakEnv: peakEnv.toFixed(3),
+          threshold: this.threshold.toFixed(3),
+          overshoot: overshoot.toFixed(3),
           dynamicCut: dynamicCutDb.toFixed(1) + 'dB',
           triggered: this._dbgMinK < 0.99
         });
         
         this._dbgBand = 0;
         this._dbgMinK = 1.0;
+        this._dbgMaxEnv = 0;
         this._telemetryCount = 0;
       }
     }
