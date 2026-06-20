@@ -48,12 +48,20 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     // Array temporário para evitar recriar Float32Array a cada sample
     const blockSamples = new Float32Array(numChannels);
     
+    let blockPeakIn = 0;
+    let blockPeakOut = 0;
+    let blockRmsIn = 0;
+    
     for (let i = 0; i < blockSize; ++i) {
       let maxTP = 0;
       
       // 1. Rotação de Fase & Detecção de True Peak por canal
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
+        
+        const absIn = Math.abs(sample);
+        if (absIn > blockPeakIn) blockPeakIn = absIn;
+        blockRmsIn += sample * sample;
         
         // Aplica cascata de All-Pass se habilitada para dispersar densidade de pico
         if (this.enablePhaseRotation) {
@@ -67,6 +75,9 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
             sample = y;
           }
         }
+        
+        const absRot = Math.abs(sample);
+        if (absRot > blockPeakOut) blockPeakOut = absRot;
         
         blockSamples[ch] = sample;
         
@@ -147,6 +158,38 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
       
       this.delayWritePtr = (this.delayWritePtr + 1) % this.delayLength;
     }
+    
+    if (this.enablePhaseRotation) {
+      this._dbgPeakIn = Math.max(this._dbgPeakIn || 0, blockPeakIn);
+      this._dbgPeakOut = Math.max(this._dbgPeakOut || 0, blockPeakOut);
+      this._dbgRms = (this._dbgRms || 0) + blockRmsIn;
+      this._telemetryCount = (this._telemetryCount || 0) + 1;
+      
+      if (this._telemetryCount >= 60) {
+        const samples = 60 * blockSize * numChannels;
+        const rms = Math.sqrt(this._dbgRms / samples) + 1e-12;
+        
+        const crestBefore = this._dbgPeakIn / rms;
+        const crestAfter = this._dbgPeakOut / rms;
+        
+        const peakReductionDb = 20 * Math.log10((this._dbgPeakOut + 1e-12) / (this._dbgPeakIn + 1e-12));
+        
+        this.port.postMessage({
+          type: 'telemetry',
+          name: 'PhaseRot',
+          crestBefore: crestBefore.toFixed(1),
+          crestAfter: crestAfter.toFixed(1),
+          peakReduction: peakReductionDb.toFixed(1) + 'dB',
+          triggered: true
+        });
+        
+        this._dbgPeakIn = 0;
+        this._dbgPeakOut = 0;
+        this._dbgRms = 0;
+        this._telemetryCount = 0;
+      }
+    }
+    
     return true;
   }
 }

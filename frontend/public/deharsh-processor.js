@@ -78,6 +78,8 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     let blockMaxAmp = 0;
     let blockPowerSum = 0;
     const sampleCount = inL.length;
+    let minK = 1.0;
+    let sumBand = 0;
     
     for (let i = 0; i < sampleCount; i++) {
       const L = inL[i];
@@ -104,6 +106,7 @@ class DeHarshProcessor extends AudioWorkletProcessor {
       
       // 3. Retificar e obter a energia estéreo combinada
       const rect = Math.max(Math.abs(vbp_L), Math.abs(vbp_R));
+      sumBand += rect * rect;
       
       // Envelope tracker adaptativo
       if (rect > this.env) {
@@ -139,7 +142,10 @@ class DeHarshProcessor extends AudioWorkletProcessor {
       bStateR[0] = 2 * vbp_bR - bStateR[0];
       bStateR[1] = 2 * vlp_bR - bStateR[1];
       
+      
       outR[i] = R + (K - 1.0) * this.kBell * vbp_bR;
+      
+      if (K < minK) minK = K;
     }
     
     // Atualiza os trackers para o próximo bloco
@@ -147,6 +153,30 @@ class DeHarshProcessor extends AudioWorkletProcessor {
       const blockRms = Math.sqrt(blockPowerSum / sampleCount);
       this.peakTracker = 0.95 * this.peakTracker + 0.05 * blockMaxAmp;
       this.rmsTracker = 0.95 * this.rmsTracker + 0.05 * blockRms;
+    }
+    
+    if (this.active) {
+      this._dbgBand = (this._dbgBand || 0) + sumBand;
+      this._dbgMinK = Math.min(this._dbgMinK || 1.0, minK);
+      this._telemetryCount = (this._telemetryCount || 0) + 1;
+      
+      if (this._telemetryCount >= 60) {
+        const samples = 60 * sampleCount;
+        const bandRMS = Math.sqrt(this._dbgBand / samples);
+        const dynamicCutDb = 20 * Math.log10(this._dbgMinK + 1e-12);
+        
+        this.port.postMessage({
+          type: 'telemetry',
+          name: 'DeHarsh',
+          bandRMS: bandRMS.toFixed(3),
+          dynamicCut: dynamicCutDb.toFixed(1) + 'dB',
+          triggered: this._dbgMinK < 0.99
+        });
+        
+        this._dbgBand = 0;
+        this._dbgMinK = 1.0;
+        this._telemetryCount = 0;
+      }
     }
     
     return true;

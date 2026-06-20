@@ -595,6 +595,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deesser-processor.js');
       const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
       deesserNode.port.postMessage({ active: enableDeesser });
+      deesserNode.port.onmessage = (e) => {
+        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+      };
       deesserRef.current = deesserNode;
       currentNode.connect(deesserNode);
       currentNode = deesserNode;
@@ -602,6 +605,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deharsh-processor.js');
       const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
       deharshNode.port.postMessage({ active: enableDeharsh });
+      deharshNode.port.onmessage = (e) => {
+        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+      };
       deharshRef.current = deharshNode;
       currentNode.connect(deharshNode);
       currentNode = deharshNode;
@@ -622,6 +628,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
+      submonoNode.port.onmessage = (e) => {
+        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+      };
       submonoRef.current = submonoNode;
       currentNode.connect(submonoNode);
       currentNode = submonoNode;
@@ -718,6 +727,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/lumina-mastering.js');
         const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
         masteringNode.port.postMessage({ enablePhaseRotation });
+        masteringNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        };
         masteringRef.current = masteringNode;
         finalNode.connect(masteringNode);
         finalNode = masteringNode;
