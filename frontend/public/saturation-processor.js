@@ -138,7 +138,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
   }
   _F1_mode(x) {
     if (this.mode === 'tape') return this._F_tape(x);
-    if (this.mode === 'transformer') return this._transformer(x);
+    if (this.mode === 'transformer') return this._F_transformer(x);
     return this._F_tube(x);
   }
   _F2_mode(x) {
@@ -175,6 +175,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
       return true;
     }
 
+    const wet = this.mix, dry = 1 - wet;
     const chs = input.length;
 
     // Lazy initialization of state variables
