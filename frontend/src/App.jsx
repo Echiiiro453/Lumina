@@ -3,7 +3,6 @@ import BackgroundMedia from './components/BackgroundMedia';
 import TopAppBar from './components/TopAppBar';
 import QueueDrawer from './components/QueueDrawer';
 import SpotifyModal from './components/SpotifyModal';
-import BatchDownloadModal from './components/BatchDownloadModal';
 import { t, getLanguage, setLanguage } from './i18n';
 import { Search, Download, Music, AlertCircle, CheckCircle, ArrowRight, ArrowRightLeft, Settings, Upload, FileText, Check, Scissors, Sliders, X, List, Trash2, Plus, PlayCircle, Minimize2, Save, FolderOpen, AlertTriangle, Info, Power, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Heart, Copy, Github, RefreshCw, Wand2, Clock, Menu, Mic, Smartphone, BellRing, ClipboardPaste, ListPlus } from 'lucide-react';
 import { RippleButton } from './components/Ripple';
@@ -1406,16 +1405,6 @@ function App() {
                   <Music size={18} />
                   <span className="hidden sm:inline">Importar Playlist</span>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowBatchModal(true)}
-                  className="sm:flex-none h-12 px-6 rounded-full bg-surface-container border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-medium transition-all flex items-center justify-center gap-2 hover:scale-[1.02]"
-                  title={t('batchDownloadTitle') || 'Baixar em Lote'}
-                >
-                  <ListPlus size={18} />
-                  <span className="hidden sm:inline">{t('batchDownload') || 'Baixar em Lote'}</span>
-                </button>
               </div>
             </motion.form>
           )}
@@ -2155,12 +2144,6 @@ function App() {
       <SubscriptionsModal
         isOpen={showSubscriptionsModal}
         onClose={() => setShowSubscriptionsModal(false)}
-      />
-
-      <BatchDownloadModal
-        isOpen={showBatchModal}
-        onClose={() => setShowBatchModal(false)}
-        onConfirm={handleBatchEnqueue}
       />
     </div>
       {/* New Converter Modal */}
