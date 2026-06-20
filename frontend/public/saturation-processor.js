@@ -292,58 +292,19 @@ class SaturationProcessor extends AudioWorkletProcessor {
           const deltaH = H - H_prev;
           this.prevH[ch] = H;
 
-          // 1. Multi-domain Preisach hysteresis model with Mean-Field Interaction (5 domains)
-          const couplingStrength = 0.10;
-          const H_eff1 = H + couplingStrength * (M2 + M3 + M4 + M5);
-          const H_eff2 = H + couplingStrength * (M1 + M3 + M4 + M5);
-          const H_eff3 = H + couplingStrength * (M1 + M2 + M4 + M5);
-          const H_eff4 = H + couplingStrength * (M1 + M2 + M3 + M5);
-          const H_eff5 = H + couplingStrength * (M1 + M2 + M3 + M4);
-
-          // Domain updates (asymmetric hysteretic rates with Soft-Sign for C1 continuity)
-          // Using Math.tanh(deltaH / 0.05) instead of Math.sign(deltaH) eliminates "radio tuning" zipper noise
-          const softSign = Math.tanh(deltaH / 0.05);
-          
-          const rate1 = 0.30 * (1.0 + 0.5 * softSign * Math.tanh(M1 / 0.5));
-          const nextM1 = M1 + rate1 * (Math.tanh(H_eff1 * 2.0) - M1);
+          // 1. Single-domain Macro Hysteresis model (Otimizado para salvar 80% de CPU)
+          const softSign = Math.tanh(deltaH / 0.1);
+          const rate1 = 0.50 * (1.0 + 0.5 * softSign * Math.tanh(M1 / 0.5));
+          const nextM1 = M1 + rate1 * (Math.tanh(H * 2.0) - M1);
           const dM1 = nextM1 - M1;
           M1 = nextM1;
           this.magState1[ch] = M1;
 
-          const rate2 = 0.20 * (1.0 + 0.4 * softSign * Math.tanh(M2 / 0.5));
-          const nextM2 = M2 + rate2 * (Math.tanh(H_eff2 * 1.3) - M2);
-          const dM2 = nextM2 - M2;
-          M2 = nextM2;
-          this.magState2[ch] = M2;
+          // Net magnetization
+          const M = M1;
 
-          const rate3 = 0.12 * (1.0 + 0.3 * softSign * Math.tanh(M3 / 0.5));
-          const nextM3 = M3 + rate3 * (Math.tanh(H_eff3 * 0.9) - M3);
-          const dM3 = nextM3 - M3;
-          M3 = nextM3;
-          this.magState3[ch] = M3;
-
-          const rate4 = 0.07 * (1.0 + 0.25 * softSign * Math.tanh(M4 / 0.5));
-          const nextM4 = M4 + rate4 * (Math.tanh(H_eff4 * 0.5) - M4);
-          const dM4 = nextM4 - M4;
-          M4 = nextM4;
-          this.magState4[ch] = M4;
-
-          const rate5 = 0.03 * (1.0 + 0.15 * softSign * Math.tanh(M5 / 0.5));
-          const nextM5 = M5 + rate5 * (Math.tanh(H_eff5 * 0.2) - M5);
-          const dM5 = nextM5 - M5;
-          M5 = nextM5;
-          this.magState5[ch] = M5;
-
-          // Net magnetization (weighted average)
-          const M = 0.12 * M1 + 0.25 * M2 + 0.32 * M3 + 0.20 * M4 + 0.11 * M5;
-
-          // Endogenous Barkhausen Noise from micro-domain state transitions
-          const bark1 = dM1 * (Math.random() - 0.5);
-          const bark2 = dM2 * (Math.random() - 0.5);
-          const bark3 = dM3 * (Math.random() - 0.5);
-          const bark4 = dM4 * (Math.random() - 0.5);
-          const bark5 = dM5 * (Math.random() - 0.5);
-          const rawBarkhausen = 0.12 * bark1 + 0.25 * bark2 + 0.32 * bark3 + 0.20 * bark4 + 0.11 * bark5;
+          // Endogenous Barkhausen Noise
+          const rawBarkhausen = dM1 * (Math.random() - 0.5);
           const barkhausenNoise = 6e-5 * this.drive * rawBarkhausen;
 
           // 2. Physical tape noise (crossover: LF grain & 1/f Pink HF hiss)

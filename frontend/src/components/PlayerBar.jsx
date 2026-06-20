@@ -280,8 +280,38 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [eqGains, eqPreset]);
 
 
-  // Initialize visualizer upon user play interaction
-  
+  // Atualiza em tempo real os nós de processamento do DSP
+  useEffect(() => {
+    if (submonoRef.current && audioContextRef.current) {
+      submonoRef.current.port.postMessage({ active: enableSubmono });
+    }
+  }, [enableSubmono, audioContextRef.current]);
+
+  useEffect(() => {
+    if (transientRef.current && audioContextRef.current) {
+      transientRef.current.port.postMessage({ active: enableTransient, attackAmount: transientAttack, sustainAmount: transientSustain });
+    }
+  }, [enableTransient, transientAttack, transientSustain, audioContextRef.current]);
+
+  useEffect(() => {
+    if (adaptiveEqRef.current && audioContextRef.current) {
+      adaptiveEqRef.current.port.postMessage({ active: enableAdaptiveEq });
+    }
+  }, [enableAdaptiveEq, audioContextRef.current]);
+
+  useEffect(() => {
+    if (deesserRef.current && audioContextRef.current) {
+      deesserRef.current.port.postMessage({ active: enableDeesser });
+    }
+  }, [enableDeesser, audioContextRef.current]);
+
+  useEffect(() => {
+    if (deharshRef.current && audioContextRef.current) {
+      deharshRef.current.port.postMessage({ active: enableDeharsh });
+    }
+  }, [enableDeharsh, audioContextRef.current]);
+
+  // Atualiza os filtros de EQ se o currentPreset ou slider mudar
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.playbackRate = playbackRate;
