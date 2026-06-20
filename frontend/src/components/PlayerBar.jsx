@@ -507,20 +507,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [motionMode, motionRadius, motionSpeed]);
 
-  // 8D Audio Motion System Loop
-  useEffect(() => {
-    if (!enable8D || motionMode === 'Parado') {
-      if (panner8DRef.current && audioContextRef.current) {
-        const param = panner8DRef.current.parameters ? panner8DRef.current.parameters.get('panAngle') : panner8DRef.current.pan;
-        if (param) param.setValueAtTime(0, audioContextRef.current.currentTime);
-      }
-      return;
-    }
-
-    let animationFrameId;
-    let theta = 0;
-
-    // --- Genre Profile Macro Preset ---
+  // --- Genre Profile Macro Preset ---
   useEffect(() => {
     const GENRE_PROFILES = {
       Rock: { eqLow: 0, eqMid: -1, eqPresence: 1, eqAir: 1, spatialWet: 0.15, roomPreset: 'Club', roomWet: 0.08, depth: 0.3, satDrive: 0.2, satMix: 0.1, bassEnhance: 0.1 },
@@ -578,7 +565,20 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [genreProfile, enable8D]);
 
-  const updatePan = () => {
+  // 8D Audio Motion System Loop
+  useEffect(() => {
+    if (!enable8D || motionMode === 'Parado') {
+      if (panner8DRef.current && audioContextRef.current) {
+        const param = panner8DRef.current.parameters ? panner8DRef.current.parameters.get('panAngle') : panner8DRef.current.pan;
+        if (param) param.setValueAtTime(0, audioContextRef.current.currentTime);
+      }
+      return;
+    }
+
+    let animationFrameId;
+    let theta = 0;
+
+    const updatePan = () => {
       if (!panner8DRef.current || !audioContextRef.current) return;
       
       theta += (motionSpeed * 0.03);
