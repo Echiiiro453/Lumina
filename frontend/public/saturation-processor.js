@@ -222,7 +222,24 @@ class SaturationProcessor extends AudioWorkletProcessor {
         
         // Safeguard original input for clean dry mix path
         const xOrigSafe = (isNaN(xOrig) || !isFinite(xOrig)) ? 0.0 : xOrig;
-        let x = xOrigSafe;
+        
+        // 0. Pre-Saturation High-Pass Filter (fc ~ 30Hz)
+        // Corta os subgraves que causam "fuzz" na válvula, preservando-os no Dry Signal.
+        const R = 1 - (Math.PI * 2 * 30.0) / 48000;
+        const dcBlockLastIn = this.dcBlockX[ch];
+        this.dcBlockX[ch] = xOrigSafe;
+        this.dcBlockY[ch] = xOrigSafe - dcBlockLastIn + R * this.dcBlockY[ch];
+        let preFilter = this.dcBlockY[ch];
+
+        // 0.5. Pre-Drive Low-Shelf (-1.5dB @ 100Hz)
+        // Separação LPF 1-polo para atenuar o low-end que colide com a distorção.
+        const w0 = 2 * Math.PI * 100.0 / 48000;
+        const alpha = Math.exp(-w0);
+        this.lowShelfY[ch] = (1 - alpha) * preFilter + alpha * this.lowShelfY[ch];
+        const lowBand = this.lowShelfY[ch];
+        const highBand = preFilter - lowBand;
+        
+        let x = highBand + lowBand * 0.841; // 10^(-1.5/20) = 0.841 (-1.5dB)
 
         // Fast RMS for instant noise gating (tau ~ 2ms)
         this.fastRmsIn[ch] = this.fastRmsIn[ch] * 0.99 + (xOrigSafe * xOrigSafe) * 0.01;
@@ -392,20 +409,6 @@ class SaturationProcessor extends AudioWorkletProcessor {
           xFeed = M + tapeNoise;
         }
 
-        // DC Blocker (Simulates Playback Head Inductive Derivative)
-        // 0. Pre-Saturation High-Pass Filter (fc ~ 35Hz)
-        // Corta os subgraves antes de entrarem na válvula para evitar "fuzz" rasgado por intermodulação
-        const R = 1 - (Math.PI * 2 * 35.0) / 48000; // Aproximação de 1-polo para 48kHz
-        const dcBlockLastIn = this.dcBlockX[ch];
-        this.dcBlockX[ch] = xOrigSafe;
-        this.dcBlockY[ch] = xOrigSafe - dcBlockLastIn + R * this.dcBlockY[ch];
-        const dcBlocked = this.dcBlockY[ch];
-        const saturated = dcBlocked;
-        outCh[i] = saturated * this.mix + xOrigSafe * (1 - this.mix);
-        
-        // Track RMS of the clean saturated signal (ignoring noise) to prevent bias loop
-        const pureOutput = (this.mode === 'tape' && typeof M !== 'undefined') ? (outCh[i] - dcBlocked * this.mix + (M - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch]) * this.mix) : outCh[i];
-        this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
 
         const d1 = xFeed - x1;
         const d2 = x1 - x2;
@@ -451,8 +454,13 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const staticMakeup = 1.0 / (1.0 + this.drive * 2.5);
         const satCompensated = sat * staticMakeup;
 
+        const wet = this.mix;
+        const dry = 1.0 - this.mix;
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
 
+        // Track RMS of the clean saturated signal (ignoring noise) to prevent bias loop
+        const pureOutput = (this.mode === 'tape' && typeof M !== 'undefined') ? (satCompensated * wet + (M - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch]) * wet) : finalSignal;
+        this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
         // 6. Post-Saturation DC Blocker (fc ~ 20Hz)
         // Válvulas assimétricas geram DC bias pesado. Removemos para proteger o headroom e evitar clique no DAC.
         const R_post = 1 - (Math.PI * 2 * 20.0) / 48000;

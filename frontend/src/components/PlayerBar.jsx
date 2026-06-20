@@ -89,7 +89,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const deharshRef = useRef(null);
 
   const [enableSaturation, setEnableSaturation] = useState(false);
-  const [satDrive, setSatDrive] = useState(0.24);
+  const [satDrive, setSatDrive] = useState(0.20);
   const [satMode, setSatMode] = useState('tube');
   const saturationRef = useRef(null);
 
@@ -334,7 +334,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [transientAttack, transientSustain]);
 
   useEffect(() => {
-    if (saturationRef.current) saturationRef.current.port.postMessage({ mode: satMode, drive: satDrive, mix: 0.50 });
+    if (saturationRef.current) saturationRef.current.port.postMessage({ mode: satMode, drive: satDrive, mix: 0.35 });
   }, [satMode, satDrive]);
 
   useEffect(() => {
@@ -608,7 +608,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       await loadModule('/saturation-processor.js');
       const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
-      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 0.50 });
+      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 0.35 });
       saturationRef.current = saturationNode;
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
