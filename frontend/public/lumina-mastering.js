@@ -30,6 +30,7 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     this.apfStateY = Array.from({ length: MAX_CH }, () => new Float32Array(1));
     this.rotatedBuffer = Array.from({ length: MAX_CH }, () => new Float32Array(128));
     this.currentRotMix = 0.0;
+    this.currentRotMix = 0.0;
     
     this.port.onmessage = (e) => {
       if (e.data.enablePhaseRotation !== undefined) {
@@ -94,14 +95,20 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
       crestAfterCandidate = blockPeakRot / rms;
       peakReductionDb = 20 * Math.log10((blockPeakRot + 1e-12) / (blockPeakIn + 1e-12));
       
-      const peakOk = peakReductionDb <= -0.35;
-      const crestOk = crestAfterCandidate < (crestBefore - 0.05);
+      const crestHighEnough = crestBefore >= 4.0;
+      const peakGood = peakReductionDb <= -0.7;
+      const peakNotTooStrong = peakReductionDb >= -1.5;
+      const crestImproved = crestAfterCandidate < (crestBefore - 0.25);
       
-      if (peakOk && crestOk) {
+      if (crestHighEnough && peakGood && peakNotTooStrong && crestImproved) {
         accepted = true;
         rejectReason = "none";
-      } else if (!peakOk) {
-        rejectReason = "rejected_peak_worse";
+      } else if (!crestHighEnough) {
+        rejectReason = "rejected_crest_too_low";
+      } else if (!peakGood) {
+        rejectReason = "rejected_peak_reduction_weak";
+      } else if (!peakNotTooStrong) {
+        rejectReason = "rejected_peak_reduction_extreme";
       } else {
         rejectReason = "rejected_crest_worse";
       }
@@ -113,14 +120,19 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     }
     
     // Pass 2: Output Selection & Limiting
+    const targetMix = accepted ? 0.25 : 0.0;
+    const mixSmoothing = 0.005; // Smoothing lento para evitar saltos
+    
     for (let i = 0; i < blockSize; ++i) {
       let maxTP = 0;
+      
+      this.currentRotMix += mixSmoothing * (targetMix - this.currentRotMix);
       
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
         
-        if (this.enablePhaseRotation && accepted) {
-           sample = this.rotatedBuffer[ch][i];
+        if (this.enablePhaseRotation) {
+           sample = sample * (1.0 - this.currentRotMix) + this.rotatedBuffer[ch][i] * this.currentRotMix;
         }
         
         blockSamples[ch] = sample;
