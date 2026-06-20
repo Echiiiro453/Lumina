@@ -70,6 +70,10 @@ class DepthProcessor extends AudioWorkletProcessor {
       // Musical Depth cap at 0.65 for safety, allow up to 1.0 if pushed
       const musicalDepth = safeDepth; 
       
+      // Proteger o Vocal (Mid) isolando a intensidade do efeito na ambiência (Side)
+      const midDepth = safeDepth * 0.25;
+      const sideDepth = safeDepth;
+      
       // 1. Converter para Mid/Side
       const mid = (L + R) * 0.70710678;
       const side = (L - R) * 0.70710678;
@@ -79,7 +83,7 @@ class DepthProcessor extends AudioWorkletProcessor {
       const hpMid = 0.57 * (mid - this.prevMid[0]) + 0.57 * this.prevHpMid[0];
       this.prevMid[0] = mid;
       this.prevHpMid[0] = hpMid;
-      const midTilt = -6.0 * this.depth;
+      const midTilt = -6.0 * midDepth;
       const midTiltGain = Math.pow(10.0, midTilt / 20.0) - 1.0;
       const processedMid = mid + midTiltGain * hpMid;
       
@@ -95,8 +99,9 @@ class DepthProcessor extends AudioWorkletProcessor {
       this.sideDelayBuf[this.sideWritePtr] = processedSide;
       
       // 2.0ms base + up to 10.0ms delay from safeDepth
-      const targetDelayMs = 2.0 + safeDepth * 10.0;
-      const targetDelaySamples = Math.round((targetDelayMs / 1000.0) * this.sampleRate);
+      const targetDelayMs = 2.0 + sideDepth * 10.0;
+      // Removido Math.round() para delay perfeitamente fracionário
+      const targetDelaySamples = (targetDelayMs / 1000.0) * this.sampleRate;
       
       this.currDelay = 0.999 * this.currDelay + 0.001 * targetDelaySamples;
       
@@ -122,7 +127,7 @@ class DepthProcessor extends AudioWorkletProcessor {
       const smoothDiff = 0.5 * (diff + Math.sqrt(diff * diff + 0.01));
       const attFactor = 1.5 * Math.tanh(smoothDiff / 1.5);
       
-      const transientGain = 1.0 - this.depth * 0.35 * attFactor;
+      const transientGain = 1.0 - midDepth * 0.35 * attFactor;
       const transientSoftMid = processedMid * transientGain;
       
       // 5. Reconstruir L/R

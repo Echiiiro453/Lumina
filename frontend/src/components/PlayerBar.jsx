@@ -126,7 +126,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const spectralGlueRef = useRef(null);
 
   const [enableStereoDepth, setEnableStereoDepth] = useState(false);
-  const [stereoDepthAmount, setStereoDepthAmount] = useState(0.5);
+  const [stereoDepthAmount, setStereoDepthAmount] = useState(0.45);
   const depthRef = useRef(null);
 
   const panner8DRef = useRef(null);
