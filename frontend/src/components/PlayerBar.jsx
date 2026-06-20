@@ -719,7 +719,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       // Split para Dry e Wet(Reverb)
       let roomTelemetryNode;
       try {
-        await loadModule('/room-telemetry-processor.js');
+        await loadModule(`/room-telemetry-processor.js?v=${Date.now()}`);
         roomTelemetryNode = new AudioWorkletNode(audioCtx, 'room-telemetry', { numberOfInputs: 2, numberOfOutputs: 1 });
         roomTelemetryNode.port.postMessage({ 
            preset: spatialMode,
