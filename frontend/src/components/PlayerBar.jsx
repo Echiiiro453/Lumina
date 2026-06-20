@@ -1870,10 +1870,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           crossfeedRef={crossfeedRef}
           stereoWidthRef={stereoWidthRef}
           exciterNodeRef={exciterNodeRef}
-          limiterRef={masteringRef}
+          limiterRef={limiterRef}
           occlusionFilterRef={occlusionFilterRef}
           workletAnchorRef={workletAnchorRef}
           eqFiltersRef={eqFiltersRef}
+          wetHpfRef={wetHpfRef}
+          wetMidEqRef={wetMidEqRef}
+          wetHighEqRef={wetHighEqRef}
+          wetLpfRef={wetLpfRef}
         />
       )}
     </>

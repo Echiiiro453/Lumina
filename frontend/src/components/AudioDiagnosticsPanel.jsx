@@ -23,10 +23,12 @@ export function AudioDiagnosticsPanel({
   audioContextRef, analyserRef, masterGainRef,
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
-  eqFiltersRef,
+  eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef,
 }) {
   const canvasRef = useRef(null);
+  const curveCanvasRef = useRef(null);
   const rafRef = useRef(null);
+  const curveRafRef = useRef(null);
   const [nodes, setNodes] = useState([]);
   const [lufs, setLufs] = useState(null);
   const [reduction, setReduction] = useState(null);
@@ -183,6 +185,103 @@ export function AudioDiagnosticsPanel({
     return () => cancelAnimationFrame(raf);
   }, [isOpen, analyserRef]);
 
+  // ---- Damping Curve Visualizer ------------------------------------------
+  useEffect(() => {
+    if (!isOpen || !curveCanvasRef.current) return;
+    const canvas = curveCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    let raf;
+
+    const drawCurve = () => {
+      const hpf = wetHpfRef?.current;
+      const lpf = wetLpfRef?.current;
+      const mid = wetMidEqRef?.current;
+      const high = wetHighEqRef?.current;
+      
+      if (!hpf || !lpf || !mid || !high) {
+        raf = requestAnimationFrame(drawCurve);
+        return;
+      }
+
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, W, H);
+
+      const numPoints = W;
+      const freqArray = new Float32Array(numPoints);
+      
+      // Logarithmic frequency scale (20Hz to 20000Hz)
+      const minFreq = 20;
+      const maxFreq = 20000;
+      for (let i = 0; i < numPoints; i++) {
+        freqArray[i] = minFreq * Math.pow(maxFreq / minFreq, i / (numPoints - 1));
+      }
+
+      const magHpf = new Float32Array(numPoints);
+      const phaseHpf = new Float32Array(numPoints);
+      hpf.getFrequencyResponse(freqArray, magHpf, phaseHpf);
+
+      const magLpf = new Float32Array(numPoints);
+      const phaseLpf = new Float32Array(numPoints);
+      lpf.getFrequencyResponse(freqArray, magLpf, phaseLpf);
+
+      const magMid = new Float32Array(numPoints);
+      const phaseMid = new Float32Array(numPoints);
+      mid.getFrequencyResponse(freqArray, magMid, phaseMid);
+
+      const magHigh = new Float32Array(numPoints);
+      const phaseHigh = new Float32Array(numPoints);
+      high.getFrequencyResponse(freqArray, magHigh, phaseHigh);
+
+      ctx.beginPath();
+      for (let i = 0; i < numPoints; i++) {
+        // Multiply magnitude responses (linear gain)
+        const totalMag = magHpf[i] * magLpf[i] * magMid[i] * magHigh[i];
+        const db = 20 * Math.log10(totalMag);
+        
+        // Map -30dB to +10dB into canvas height
+        const minDb = -30;
+        const maxDb = 10;
+        let y = H - ((db - minDb) / (maxDb - minDb)) * H;
+        y = Math.max(0, Math.min(H, y));
+
+        if (i === 0) ctx.moveTo(i, y);
+        else ctx.lineTo(i, y);
+      }
+
+      // Fill area under curve
+      ctx.lineTo(W, H);
+      ctx.lineTo(0, H);
+      ctx.closePath();
+      
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, 'rgba(139, 92, 246, 0.4)');
+      grad.addColorStop(1, 'rgba(139, 92, 246, 0.0)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Draw line
+      ctx.beginPath();
+      for (let i = 0; i < numPoints; i++) {
+        const totalMag = magHpf[i] * magLpf[i] * magMid[i] * magHigh[i];
+        const db = 20 * Math.log10(totalMag);
+        let y = H - ((db + 30) / 40) * H;
+        y = Math.max(0, Math.min(H, y));
+        if (i === 0) ctx.moveTo(i, y);
+        else ctx.lineTo(i, y);
+      }
+      ctx.strokeStyle = '#8b5cf6';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      raf = requestAnimationFrame(drawCurve);
+    };
+
+    drawCurve();
+    return () => cancelAnimationFrame(raf);
+  }, [isOpen, wetHpfRef, wetLpfRef, wetMidEqRef, wetHighEqRef]);
+
   if (!isOpen) return null;
 
   const allOk = nodes.filter(n => n.ok).length;
@@ -229,6 +328,16 @@ export function AudioDiagnosticsPanel({
               </p>
               <canvas
                 ref={canvasRef}
+                width={640}
+                height={100}
+                className="w-full rounded-xl border border-outline-variant/20 mb-4"
+              />
+              
+              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2 flex items-center gap-1">
+                <Radio size={10} /> Room Damping Curve (Resposta em Frequência)
+              </p>
+              <canvas
+                ref={curveCanvasRef}
                 width={640}
                 height={100}
                 className="w-full rounded-xl border border-outline-variant/20"
