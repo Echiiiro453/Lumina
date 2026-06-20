@@ -608,7 +608,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       await loadModule('/saturation-processor.js');
       const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
-      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 1.0 });
+      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 0.60 });
       saturationRef.current = saturationNode;
       currentNode.connect(saturationNode);
       currentNode = saturationNode;

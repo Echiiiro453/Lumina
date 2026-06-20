@@ -393,11 +393,13 @@ class SaturationProcessor extends AudioWorkletProcessor {
         }
 
         // DC Blocker (Simulates Playback Head Inductive Derivative)
-        // Eliminates Weiss Coupling Spontaneous Magnetization DC offset
-        const dcBlocked = xFeed - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch];
-        this.dcBlockX[ch] = xFeed;
-        this.dcBlockY[ch] = dcBlocked;
-
+        // 0. Pre-Saturation High-Pass Filter (fc ~ 40Hz)
+        // Corta os subgraves antes de entrarem na válvula para evitar "fuzz" rasgado por intermodulação
+        const R = 1 - (Math.PI * 2 * 40.0) / 48000; // Aproximação de 1-polo para 48kHz
+        const dcBlockLastIn = this.dcBlockX[ch];
+        this.dcBlockX[ch] = xOrigSafe;
+        this.dcBlockY[ch] = xOrigSafe - dcBlockLastIn + R * this.dcBlockY[ch];
+        const dcBlocked = this.dcBlockY[ch];
         const saturated = dcBlocked;
         outCh[i] = saturated * this.mix + xOrigSafe * (1 - this.mix);
         
@@ -444,9 +446,9 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const fMid12 = this._f_mode(xMid12);
         const sat = (u1 >= 1.0) ? (F1_x - F1_x1) / d1 : (d1 / (eps1 * eps1)) * (3 - 2 * u1) * (F1_x - F1_x1) + (1 - w1) * fMid12;
 
-        // 5. Static Makeup Gain (Loudness Compensation without Pumping)
-        // Em vez de AGC lento que causa pumping, usamos uma curva empírica estática que preserva a dinâmica natural
-        const staticMakeup = 1.0 / Math.sqrt(1.0 + this.drive * 4.0);
+        // 5. Static Makeup Gain (Loudness Compensation)
+        // Atenuação suave baseada no drive para não comprimir violentamente (-9 LUFS)
+        const staticMakeup = 1.0 / (1.0 + this.drive * 2.5);
         const satCompensated = sat * staticMakeup;
 
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
