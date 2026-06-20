@@ -486,7 +486,65 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     let animationFrameId;
     let theta = 0;
 
-    const updatePan = () => {
+    // --- Genre Profile Macro Preset ---
+  useEffect(() => {
+    const GENRE_PROFILES = {
+      Rock: { eqLow: 0, eqMid: -1, eqPresence: 1, eqAir: 1, spatialWet: 0.15, roomPreset: 'Club', roomWet: 0.08, depth: 0.3, satDrive: 0.2, satMix: 0.1, bassEnhance: 0.1 },
+      Jazz: { eqLow: 0.5, eqMid: -0.5, eqPresence: 0.5, eqAir: 1.0, spatialWet: 0.18, roomPreset: 'Estúdio', roomWet: 0.10, depth: 0.40, satDrive: 0.15, satMix: 0.25, bassEnhance: 0.05 },
+      Ambient: { eqLow: 1, eqMid: 0, eqPresence: -1, eqAir: 0, spatialWet: 0.30, roomPreset: 'Hall', roomWet: 0.20, depth: 0.5, satDrive: 0.1, satMix: 0.1, bassEnhance: 0.05 },
+      Orchestral: { eqLow: 1.5, eqMid: 0.5, eqPresence: 1.5, eqAir: 2.0, spatialWet: 0.25, roomPreset: 'Hall', roomWet: 0.15, depth: 0.55, satDrive: 0.05, satMix: 0.05, bassEnhance: 0.0 },
+      EDM: { eqLow: 2, eqMid: -1.5, eqPresence: 1.5, eqAir: 2.5, spatialWet: 0.20, roomPreset: 'Estúdio', roomWet: 0.08, depth: 0.25, satDrive: 0.3, satMix: 0.2, bassEnhance: 0.15 }
+    };
+    
+    const p = GENRE_PROFILES[genreProfile];
+    if (p) {
+       // Atualização de Estados Macro (UI irá disparar os micro-hooks suavizados via setTargetAtTime / postMessage)
+       setSpatialMode(p.roomPreset);
+       setReverbMix(p.roomWet);
+       setStereoDepthAmount(p.depth);
+       setSatDrive(p.satDrive);
+       setBassIntensity(p.bassEnhance * 100);
+       
+       // Mapping EQ Gains Approximation (10-bands)
+       const newGains = [
+         p.eqLow, p.eqLow, p.eqLow * 0.5, // Graves
+         p.eqMid, p.eqMid * 0.5, p.eqMid * 0.25, // Médios
+         p.eqPresence, p.eqPresence, // Presença
+         p.eqAir, p.eqAir // Ar/Agudos
+       ];
+       setEqGains(newGains);
+       
+       // Override Panner Wet for Spatial 8D se ligado
+       if (enable8D && panner8DRef.current && panner8DRef.current.parameters) {
+          const wetParam = panner8DRef.current.parameters.get('wet');
+          if (wetParam && audioContextRef.current) {
+            wetParam.setTargetAtTime(p.spatialWet, audioContextRef.current.currentTime, 0.05);
+          }
+       }
+
+       if (audioContextRef.current) {
+          logToCMD("DSP-GenreProfile", JSON.stringify({
+             type: "telemetry",
+             name: "GenreProfile",
+             profile: genreProfile,
+             eqLowDb: p.eqLow.toFixed(1),
+             eqMidDb: p.eqMid.toFixed(1),
+             eqPresenceDb: p.eqPresence.toFixed(1),
+             eqAirDb: p.eqAir.toFixed(1),
+             spatialWet: p.spatialWet.toFixed(2),
+             roomPreset: p.roomPreset,
+             roomWet: p.roomWet.toFixed(2),
+             depth: p.depth.toFixed(2),
+             saturationDrive: p.satDrive.toFixed(2),
+             saturationMix: p.satMix.toFixed(2),
+             bassEnhance: p.bassEnhance.toFixed(2),
+             applied: true
+          }), "info");
+       }
+    }
+  }, [genreProfile, enable8D]);
+
+  const updatePan = () => {
       if (!panner8DRef.current || !audioContextRef.current) return;
       
       theta += (motionSpeed * 0.03);
