@@ -572,7 +572,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       const loadModule = async (path) => {
         if (!loadedModulesRef.current[path]) {
-          await audioCtx.audioWorklet.addModule(path);
+          const cacheBuster = `?v=${Date.now()}`;
+          await audioCtx.audioWorklet.addModule(path + cacheBuster);
           loadedModulesRef.current[path] = true;
         }
       };
