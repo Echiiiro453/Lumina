@@ -38,7 +38,9 @@ class ExciterProcessor extends AudioWorkletProcessor {
     this.fastEnv = new Float32Array(MAX_CH);
     this.slowEnv = new Float32Array(MAX_CH);
     
+    this.active = false;
     this.port.onmessage = (e) => {
+      if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.amount !== undefined) {
         this.amount = Math.max(0, Math.min(e.data.amount, 1.0));
       }
@@ -68,7 +70,13 @@ class ExciterProcessor extends AudioWorkletProcessor {
   
   process(inputs, outputs) {
     const input = inputs[0], output = outputs[0];
-    if (!input || !input[0]) return true;
+    if (!input || input.length === 0 || !output || output.length === 0) return true;
+
+    if (!this.active || this.amount < 0.01) {
+      output[0].set(input[0]);
+      if (input[1] && output[1]) output[1].set(input[1]);
+      return true;
+    }
     
     const chs = input.length;
     for (let ch = 0; ch < chs; ch++) {

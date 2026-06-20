@@ -180,6 +180,29 @@ async def sync_db():
 async def get_version():
     return {"version": APP_VERSION}
 
+class TelemetryData(BaseModel):
+    source: str
+    message: str
+    level: str = "info"
+
+@app.post("/api/telemetry")
+async def api_telemetry(data: TelemetryData):
+    """
+    Recebe logs em tempo real do frontend (DSP/React) e imprime no CMD.
+    Útil para debugar a pipeline de áudio sem precisar abrir o DevTools (F12).
+    """
+    colors = {
+        "info": "\033[96m",   # Ciano
+        "warn": "\033[93m",   # Amarelo
+        "error": "\033[91m",  # Vermelho
+        "success": "\033[92m" # Verde
+    }
+    reset = "\033[0m"
+    color = colors.get(data.level, reset)
+    
+    print(f"{color}[{data.source.upper()}] {data.message}{reset}")
+    return {"status": "ok"}
+
 @app.get("/check_update")
 async def check_update():
     import urllib.request

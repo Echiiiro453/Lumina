@@ -27,8 +27,10 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
     this.recalcCoefficients();
 
+    this.active = false;
     this.port.onmessage = ({ data }) => {
       let changed = false;
+      if (data.active !== undefined) this.active = !!data.active;
       if (data.mode  !== undefined) this.mode  = data.mode;
       if (data.drive !== undefined) {
         this.drive = data.drive;
@@ -165,9 +167,14 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs) {
     const input = inputs[0], output = outputs[0];
-    if (!input || !input[0]) return true;
+    if (!input || input.length === 0 || !output || output.length === 0) return true;
 
-    const wet = this.mix, dry = 1 - wet;
+    if (!this.active) {
+      output[0].set(input[0]);
+      if (input[1] && output[1]) output[1].set(input[1]);
+      return true;
+    }
+
     const chs = input.length;
 
     // Lazy initialization of state variables

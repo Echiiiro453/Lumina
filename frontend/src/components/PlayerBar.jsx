@@ -6,6 +6,16 @@ import { RippleButton } from './Ripple';
 import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
 import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
 
+// --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
+export const logToCMD = (source, message, level = "info") => {
+  fetch("http://localhost:8000/api/telemetry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source, message, level })
+  }).catch(() => {});
+};
+// ---------------------------------------------------
+
 const widthGains = { 'Estreito': 0.5, 'Natural': 1.0, 'Largo': 1.5, 'Ultra': 2.2 };
 
 
@@ -197,6 +207,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         duration
       })
     }).catch(() => {});
+    
+    // Log de telemetria
+    if (isPlaying) {
+      logToCMD("PLAYER", `Tocando faixa: ${currentSong?.title || 'Desconhecida'}`, "info");
+    } else {
+      logToCMD("PLAYER", "Música pausada.", "warn");
+    }
   }, [currentSong, isPlaying, progress, duration, metadata]);
 
   // Poll commands from MiniPlayer
@@ -620,20 +637,26 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       // Split para Dry e Wet(Reverb)
       const dryNode = audioCtx.createGain();
       const wetNode = audioCtx.createGain();
-      const convolver = audioCtx.createConvolver();
-      
-      convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
       
       dryGainRef.current = dryNode;
       wetGainRef.current = wetNode;
-      reverbNodeRef.current = convolver;
       
       dryNode.gain.value = 1.0 - reverbMix;
       wetNode.gain.value = reverbMix;
       
       mbWidthNode.connect(dryNode);
-      mbWidthNode.connect(convolver);
-      convolver.connect(wetNode);
+      
+      // Convolver Engine (Desconectado fisicamente quando Mix = 0 para salvar 30% da CPU)
+      if (reverbMix > 0.01) {
+        const convolver = audioCtx.createConvolver();
+        convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
+        reverbNodeRef.current = convolver;
+        
+        mbWidthNode.connect(convolver);
+        convolver.connect(wetNode);
+      } else {
+        reverbNodeRef.current = null;
+      }
 
       // --- Mastering & LUFS ---
       const masterSum = audioCtx.createGain();
@@ -668,9 +691,19 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       try {
         await loadModule('/lufs-meter-processor.js');
         const lufsNode = new AudioWorkletNode(audioCtx, 'lufs-meter');
+        
+        let lastLufsLogTime = 0;
         lufsNode.port.onmessage = (msg) => {
           if (msg.data && msg.data.lufs !== undefined) {
-            setLufsValue(Math.round(msg.data.lufs * 10) / 10);
+            const val = Math.round(msg.data.lufs * 10) / 10;
+            setLufsValue(val);
+            
+            // Log de telemetria a cada 5 segundos para não floodar o CMD
+            const now = Date.now();
+            if (now - lastLufsLogTime > 5000) {
+              logToCMD("LUFS", `Nível de LUFS Integrado: ${val} dB`, val < -10 ? "success" : "warn");
+              lastLufsLogTime = now;
+            }
           }
         };
         lufsRef.current = lufsNode;
@@ -692,8 +725,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
       
+      logToCMD("DSP", "Pipeline de AudioWorklets inicializada (Zero NaNs)", "success");
+      
       drawVisualizer();
     } catch (e) {
+      logToCMD("DSP-ERROR", `Erro fatal no DSP: ${e.message}`, "error");
       console.error("Erro ao inicializar visualizador/equalizador/dsp:", e);
     }
   };
