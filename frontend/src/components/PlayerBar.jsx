@@ -322,11 +322,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [playbackRate, preservesPitch, currentSong]);
 
   useEffect(() => {
-    if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
+    if (dryGainRef.current && dryGainRef.current.port) {
+      dryGainRef.current.port.postMessage({ wetMix: reverbMix, preset: spatialMode });
+    } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
+      // Fallback nativo
       dryGainRef.current.gain.setTargetAtTime(1.0 - reverbMix, audioContextRef.current.currentTime, 0.1);
       wetGainRef.current.gain.setTargetAtTime(reverbMix, audioContextRef.current.currentTime, 0.1);
     }
-  }, [reverbMix]);
+  }, [reverbMix, spatialMode]);
 
   // --- Propagate DSP parameter changes ---
   useEffect(() => {
@@ -714,16 +717,29 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       nextNodeAfterExciter.connect(mbWidthNode);
 
       // Split para Dry e Wet(Reverb)
-      const dryNode = audioCtx.createGain();
-      const wetNode = audioCtx.createGain();
+      let roomTelemetryNode;
+      try {
+        await loadModule('/room-telemetry-processor.js');
+        roomTelemetryNode = new AudioWorkletNode(audioCtx, 'room-telemetry', { numberOfInputs: 2, numberOfOutputs: 1 });
+        roomTelemetryNode.port.postMessage({ 
+           preset: spatialMode,
+           wetMix: reverbMix,
+           preDelayMs: 18, 
+           rt60: 3.5
+        });
+        roomTelemetryNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        };
+      } catch (e) {
+        console.warn("Room telemetry load failed", e);
+        // Fallback
+        roomTelemetryNode = audioCtx.createGain();
+      }
       
-      dryGainRef.current = dryNode;
-      wetGainRef.current = wetNode;
+      dryGainRef.current = roomTelemetryNode;
+      wetGainRef.current = audioCtx.createGain(); // Preservado caso ocorra fallback
       
-      dryNode.gain.value = 1.0 - reverbMix;
-      wetNode.gain.value = reverbMix;
-      
-      mbWidthNode.connect(dryNode);
+      mbWidthNode.connect(roomTelemetryNode, 0, 0);
       
       // Convolver Engine (Desconectado fisicamente quando Mix = 0 para salvar 30% da CPU)
       if (reverbMix > 0.01) {
@@ -732,15 +748,19 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         reverbNodeRef.current = convolver;
         
         mbWidthNode.connect(convolver);
-        convolver.connect(wetNode);
+        if (roomTelemetryNode.numberOfInputs === 2) {
+           convolver.connect(roomTelemetryNode, 0, 1);
+        } else {
+           convolver.connect(wetGainRef.current);
+           wetGainRef.current.connect(roomTelemetryNode);
+        }
       } else {
         reverbNodeRef.current = null;
       }
 
       // --- Mastering & LUFS ---
       const masterSum = audioCtx.createGain();
-      dryNode.connect(masterSum);
-      wetNode.connect(masterSum);
+      roomTelemetryNode.connect(masterSum);
       masterGainRef.current = masterSum;
 
       let finalNode = masterSum;
