@@ -108,6 +108,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const masterGainRef = useRef(null);
   const wetHpfRef = useRef(null);
   const wetLpfRef = useRef(null);
+  const wetMidEqRef = useRef(null);
+  const wetHighEqRef = useRef(null);
   const [enable8D, setEnable8D] = useState(false);
   const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
@@ -116,8 +118,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [bassEnhancer, setBassEnhancer] = useState(false);
   const [bassIntensity, setBassIntensity] = useState(50);
   const [roomMorphing, setRoomMorphing] = useState(false);
-  const [lufsMode, setLufsMode] = useState('Streaming');
+  const [lufsMode, setLufsMode] = useState('Integrated');
   const [spatialMode, setSpatialMode] = useState('Concerto');
+  const [roomMaterial, setRoomMaterial] = useState('Madeira');
   const [genreProfile, setGenreProfile] = useState('Rock');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [harmonicExciter, setHarmonicExciter] = useState('medium');
@@ -333,8 +336,19 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 }
   };
 
+  const ROOM_MATERIALS = {
+    Madeira: { hfDampingDb: -2.0, midDampingDb: -0.5, wetWidth: 0.80 },
+    Concreto: { hfDampingDb: -0.8, midDampingDb: 0.0, wetWidth: 0.85 },
+    Vidro: { hfDampingDb: 0.5, midDampingDb: 0.0, wetWidth: 0.90 },
+    Tecido: { hfDampingDb: -4.0, midDampingDb: -1.0, wetWidth: 0.70 },
+    Pedra: { hfDampingDb: -2.8, midDampingDb: -0.8, wetWidth: 0.70 },
+    Metal: { hfDampingDb: 0.0, midDampingDb: 0.5, wetWidth: 0.85 },
+    Carpete: { hfDampingDb: -5.0, midDampingDb: -1.5, wetWidth: 0.65 }
+  };
+
   useEffect(() => {
     let currentPreset = ROOM_PRESETS[spatialMode] || ROOM_PRESETS["Estúdio"];
+    let currentMat = ROOM_MATERIALS[roomMaterial] || ROOM_MATERIALS["Madeira"];
     
     // Atualiza o slider se o preset tiver mudado a sala
     if (reverbMix === 0.0 && currentPreset.wetMix > 0) {
@@ -347,6 +361,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     if (wetLpfRef.current && currentPreset.wetLpf) {
       wetLpfRef.current.frequency.setTargetAtTime(currentPreset.wetLpf, audioContextRef.current.currentTime, 0.1);
     }
+    
+    // Filtros de Material (Mid e HF Damping)
+    if (wetMidEqRef.current) {
+      wetMidEqRef.current.gain.setTargetAtTime(currentMat.midDampingDb, audioContextRef.current.currentTime, 0.1);
+    }
+    if (wetHighEqRef.current) {
+      wetHighEqRef.current.gain.setTargetAtTime(currentMat.hfDampingDb, audioContextRef.current.currentTime, 0.1);
+    }
 
     if (dryGainRef.current && dryGainRef.current.port) {
       dryGainRef.current.port.postMessage({ 
@@ -354,15 +376,27 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          preset: spatialMode,
          preDelayMs: currentPreset.preDelayMs,
          rt60: currentPreset.rt60,
-         wetWidth: currentPreset.wetWidth,
+         wetWidth: currentPreset.wetWidth * currentMat.wetWidth,
          active: true
       });
+      
+      logToCMD("DSP-RoomMaterial", JSON.stringify({
+         type: "telemetry",
+         name: "RoomMaterial",
+         roomPreset: spatialMode,
+         material: roomMaterial,
+         hfDampingDb: currentMat.hfDampingDb.toFixed(1),
+         midDampingDb: currentMat.midDampingDb.toFixed(1),
+         wetWidth: (currentPreset.wetWidth * currentMat.wetWidth).toFixed(2),
+         applied: true
+      }), "info");
+
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
       // Fallback nativo
       dryGainRef.current.gain.setTargetAtTime(1.0 - reverbMix, audioContextRef.current.currentTime, 0.1);
       wetGainRef.current.gain.setTargetAtTime(reverbMix, audioContextRef.current.currentTime, 0.1);
     }
-  }, [reverbMix, spatialMode]);
+  }, [reverbMix, spatialMode, roomMaterial]);
 
   // --- Propagate DSP parameter changes ---
   useEffect(() => {
@@ -847,14 +881,30 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       wetHpf.frequency.value = 150; 
       wetHpfRef.current = wetHpf;
       
+      const wetMidEq = audioCtx.createBiquadFilter();
+      wetMidEq.type = 'peaking';
+      wetMidEq.frequency.value = 1000;
+      wetMidEq.Q.value = 0.7;
+      wetMidEq.gain.value = 0.0;
+      wetMidEqRef.current = wetMidEq;
+      
+      const wetHighEq = audioCtx.createBiquadFilter();
+      wetHighEq.type = 'highshelf';
+      wetHighEq.frequency.value = 4000;
+      wetHighEq.gain.value = 0.0;
+      wetHighEqRef.current = wetHighEq;
+      
       const wetLpf = audioCtx.createBiquadFilter();
       wetLpf.type = 'lowpass';
       wetLpf.frequency.value = 10000;
       wetLpfRef.current = wetLpf;
+      wetLpfRef.current = wetLpf;
       
       mbWidthNode.connect(convolver);
       convolver.connect(wetHpf);
-      wetHpf.connect(wetLpf);
+      wetHpf.connect(wetMidEq);
+      wetMidEq.connect(wetHighEq);
+      wetHighEq.connect(wetLpf);
       
       if (roomTelemetryNode.numberOfInputs === 2) {
          wetLpf.connect(roomTelemetryNode, 0, 1);
@@ -1732,6 +1782,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           roomMorphing={roomMorphing} setRoomMorphing={setRoomMorphing}
           lufsMode={lufsMode} setLufsMode={setLufsMode}
           spatialMode={spatialMode} setSpatialMode={setSpatialMode}
+          roomMaterial={roomMaterial} setRoomMaterial={setRoomMaterial}
           genreProfile={genreProfile} setGenreProfile={setGenreProfile}
           harmonicExciter={harmonicExciter} setHarmonicExciter={setHarmonicExciter}
           enablePhaseRotation={enablePhaseRotation} setEnablePhaseRotation={setEnablePhaseRotation}

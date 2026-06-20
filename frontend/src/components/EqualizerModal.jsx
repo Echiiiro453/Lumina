@@ -26,7 +26,8 @@ const SOUND_PRESETS_DATA = [
   { name: 'Voz Clara', desc: 'Presenca vocal destacada.', key: 'Vocal' }
 ];
 
-const AMBIENTES = ['Concerto', 'Estudio', 'Club', 'Hall', 'Catedral', 'Cinema', 'Cave'];
+const AMBIENTES = ['Estúdio', 'Club', 'Hall', 'Catedral', 'Cinema', 'Cave'];
+const MATERIAIS = ['Madeira', 'Concreto', 'Vidro', 'Tecido', 'Pedra', 'Metal', 'Carpete'];
 const GENEROS = ['Rock', 'Jazz', 'Ambient', 'Orchestral', 'EDM'];
 const MOTION_MODES = ['Parado', 'Elipse', 'Figura 8', 'Espiral', 'Vertical', 'Caos', 'Reativo'];
 
@@ -48,6 +49,7 @@ export function EqualizerModal({
   roomMorphing, setRoomMorphing,
   lufsMode, setLufsMode,
   spatialMode, setSpatialMode,
+  roomMaterial, setRoomMaterial,
   genreProfile, setGenreProfile,
   harmonicExciter, setHarmonicExciter,
   enablePhaseRotation, setEnablePhaseRotation,
@@ -540,8 +542,19 @@ export function EqualizerModal({
                   <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">AMBIENTES ESPACIAIS</h3>
                   <div className="flex flex-wrap gap-3">
                     {AMBIENTES.map((amb) => (
-                      <button key={amb} onClick={() => setSpatialMode(amb)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
+                      <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
                         {amb}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6">
+                  <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">MATERIAL ACÚSTICO</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {MATERIAIS.map((mat) => (
+                      <button key={mat} onClick={() => setRoomMaterial && setRoomMaterial(mat)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${mat === roomMaterial ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
+                        {mat}
                       </button>
                     ))}
                   </div>
