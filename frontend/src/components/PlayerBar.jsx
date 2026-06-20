@@ -275,7 +275,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     localStorage.setItem('appmusica_eq_bands', JSON.stringify(eqGains));
     
     // Apply to Web Audio API filters
-    if (eqFiltersRef.current.length === 10) {
+    if (eqFiltersRef.current.length === 10 && audioContextRef.current) {
       eqGains.forEach((gain, i) => {
         if (eqFiltersRef.current[i]) {
           eqFiltersRef.current[i].gain.setTargetAtTime(gain, audioContextRef.current.currentTime, 0.1);
