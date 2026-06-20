@@ -9,6 +9,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     super();
 
     this.preset = "Estúdio";
+    this.material = "Madeira";
     this.preDelayMs = 0;
     this.rt60 = 0;
     this.wetMix = 0.0;
@@ -46,6 +47,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       const d = e.data || {};
       if (d.preset !== undefined) this.preset = d.preset;
+      if (d.material !== undefined) this.material = d.material;
       if (d.preDelayMs !== undefined) this.preDelayMs = toFiniteNumber(d.preDelayMs, this.preDelayMs);
       if (d.rt60 !== undefined) this.rt60 = toFiniteNumber(d.rt60, this.rt60);
       if (d.wetMix !== undefined) this.wetMix = Math.min(1, Math.max(0, toFiniteNumber(d.wetMix, this.wetMix)));
@@ -190,6 +192,35 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       const dryRMS = Math.sqrt(this._drySq / nCh);
       const wetRMS = Math.sqrt(this._wetSq / nCh);
       
+      const hasSignal = dryRMS > 0.00001 || wetRMS > 0.00001;
+      
+      if (!hasSignal) {
+        // Envia log silencioso para limpar UI e não calcula Mono Loss falso
+        this.port.postMessage({
+          type: "telemetry",
+          name: "Room",
+          preset: this.preset,
+          material: this.material,
+          active: this.active,
+          hasSignal: false,
+          dryRMS: "0.000",
+          wetRMS: "0.000",
+          earlyReflections: "0.000",
+          tailRMS: "0.000",
+          monoLossDb: "0.0"
+        });
+        this._frames = 0;
+        this._drySq = 0;
+        this._wetSq = 0;
+        this._mixSq = 0;
+        this._sumDryMid = 0;
+        this._sumWetMid = 0;
+        this._sumMixMid = 0;
+        this._sumEr = 0;
+        this._sumTail = 0;
+        return true;
+      }
+      
       const erRMS = Math.sqrt(this._sumEr / nCh);
       const tailRMS = Math.sqrt(this._sumTail / nCh);
 
@@ -210,6 +241,9 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         type: "telemetry",
         name: "Room",
         preset: this.preset,
+        material: this.material,
+        active: this.active,
+        hasSignal: true,
         preDelayMs: Number(this.preDelayMs).toString(),
         rt60: Number(this.rt60).toString() + "s",
         wetMix: duckedWetMix.toFixed(2),

@@ -228,28 +228,32 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       
       const outputPeakDb = 20 * Math.log10(this._peakOut + 1e-12);
       
-      this.port.postMessage({
-        type: 'telemetry',
-        name: 'Spatial8D',
-        mode: this.motionMode,
-        azimuthDeg: panAngle.toFixed(0),
-        elevationDeg: "0",
-        radiusM: this.radiusM.toFixed(1),
-        speed: this.speed.toFixed(2) + 'x',
-        inputCorr: inCorr.toFixed(2),
-        outputCorr: outCorr.toFixed(2),
-        midEnergy: midEnergy.toFixed(3),
-        sideEnergy: sideEnergy.toFixed(3),
-        centerDrift: centerDrift.toFixed(3),
-        ildDb: ildDb.toFixed(1),
-        itdUs: itdUs.toFixed(0),
-        wet: wet.toFixed(2),
-        diffRMS: diffRMS.toFixed(3),
-        midMotion: midMotionRMS.toFixed(4),
-        sideMotion: sideMotionRMS.toFixed(4),
-        monoLossDb: monoLossDb.toFixed(1),
-        outputPeak: outputPeakDb.toFixed(1) + 'dB'
-      });
+      const hasSignal = inL_rms > 0.00001 || inR_rms > 0.00001;
+      
+      if (hasSignal) {
+        this.port.postMessage({
+          type: 'telemetry',
+          name: 'Spatial8D',
+          mode: this.motionMode,
+          azimuthDeg: panAngle.toFixed(0),
+          elevationDeg: "0",
+          radiusM: this.radiusM.toFixed(1),
+          speed: this.speed.toFixed(2) + 'x',
+          inputCorr: inCorr.toFixed(2),
+          outputCorr: outCorr.toFixed(2),
+          midEnergy: midEnergy.toFixed(3),
+          sideEnergy: sideEnergy.toFixed(3),
+          centerDrift: centerDrift.toFixed(3),
+          ildDb: ildDb.toFixed(1),
+          itdUs: itdUs.toFixed(0),
+          wet: wet.toFixed(2),
+          diffRMS: diffRMS.toFixed(3),
+          midMotion: midMotionRMS.toFixed(4),
+          sideMotion: sideMotionRMS.toFixed(4),
+          monoLossDb: monoLossDb.toFixed(1),
+          outputPeak: outputPeakDb.toFixed(1) + 'dB'
+        });
+      }
       
       // Reset accumulators
       this._telemetryCount = 0;
