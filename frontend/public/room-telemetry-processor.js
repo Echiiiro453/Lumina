@@ -40,17 +40,17 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     const wetInput = inputs[1]; // Convolver output
     const output = outputs[0];
     
-    if (!dryInput || dryInput.length < 2) return true;
+    if (!dryInput || dryInput.length === 0 || !output || output.length === 0) return true;
     
     const dryL = dryInput[0];
-    const dryR = dryInput[1];
+    const dryR = dryInput.length > 1 ? dryInput[1] : dryInput[0];
     
-    const hasWet = wetInput && wetInput.length >= 2;
-    const wetL = hasWet ? wetInput[0] : new Float32Array(dryL.length);
-    const wetR = hasWet ? wetInput[1] : new Float32Array(dryR.length);
+    const hasWet = wetInput && wetInput.length > 0;
+    const wetL = hasWet ? wetInput[0] : null;
+    const wetR = hasWet ? (wetInput.length > 1 ? wetInput[1] : wetInput[0]) : null;
     
     const outL = output[0];
-    const outR = output[1];
+    const outR = output.length > 1 ? output[1] : output[0];
     const size = dryL.length;
     
     // O ganho Dry/Wet real será aplicado AQUI, substituindo o antigo GainNode
@@ -60,14 +60,15 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < size; i++) {
       const dL = dryL[i];
       const dR = dryR[i];
-      const wL = wetL[i];
-      const wR = wetR[i];
+      const wL = wetL ? wetL[i] : 0.0;
+      const wR = wetR ? wetR[i] : 0.0;
       
       // Mix and write to output
       const finalL = dL * dryGain + wL * wetGain;
       const finalR = dR * dryGain + wR * wetGain;
+      
       outL[i] = finalL;
-      outR[i] = finalR;
+      if (output.length > 1) outR[i] = finalR;
       
       // -- Telemetry Collection --
       this._sumDryL += dL * dL;
