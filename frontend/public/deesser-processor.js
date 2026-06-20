@@ -9,8 +9,8 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.active = false;
         const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
-    // Detection BPF centered at 6kHz, Q=2.5
-    const fc = 6000, Q = 2.5;
+    // Detection BPF centered at 6200Hz, Q=2.8
+    const fc = 6200, Q = 2.8;
     const w0 = 2 * Math.PI * fc / sr;
     const cosW0 = Math.cos(w0), sinW0 = Math.sin(w0);
     const alpha = sinW0 / (2 * Q);
@@ -22,15 +22,15 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.detZ = [0, 0];
 
     // Envelope follower
-    const atkMs = 2.0, relMs = 60.0;
+    const atkMs = 2.0, relMs = 40.0;
     this.aAtk = Math.exp(-1 / (sr * atkMs  / 1000));
     this.aRel = Math.exp(-1 / (sr * relMs / 1000));
     this.env  = 0;
 
     // Classic Logarithmic Compressor Parameters
-    this.threshold = 0.032;
-    this.ratio = 2.5;
-    this.maxGR = Math.pow(10, -6.0 / 20); // Limite hard em -6.0dB (0.501)
+    this.threshold = 0.035;
+    this.ratio = 3.5;
+    this.maxGR = Math.pow(10, -5.0 / 20); // Limite hard em -5.0dB (0.562)
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
