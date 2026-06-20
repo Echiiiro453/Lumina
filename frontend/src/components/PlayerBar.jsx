@@ -337,13 +337,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   };
 
   const ROOM_MATERIALS = {
-    Madeira: { hfDampingDb: -2.0, midDampingDb: -0.5, wetWidth: 0.80 },
-    Concreto: { hfDampingDb: -0.8, midDampingDb: 0.0, wetWidth: 0.85 },
-    Vidro: { hfDampingDb: 0.5, midDampingDb: 0.0, wetWidth: 0.90 },
-    Tecido: { hfDampingDb: -4.0, midDampingDb: -1.0, wetWidth: 0.70 },
-    Pedra: { hfDampingDb: -2.8, midDampingDb: -0.8, wetWidth: 0.70 },
-    Metal: { hfDampingDb: 0.0, midDampingDb: 0.5, wetWidth: 0.85 },
-    Carpete: { hfDampingDb: -5.0, midDampingDb: -1.5, wetWidth: 0.65 }
+    Madeira: { hfDampingDb: -2.0, midDampingDb: -0.5, wetWidth: 0.80, wetMixMult: 1.0, hpfOffset: 0, lpfOffset: -1000 },
+    Concreto: { hfDampingDb: -0.8, midDampingDb: 0.0, wetWidth: 0.85, wetMixMult: 1.1, hpfOffset: 0, lpfOffset: 2000 },
+    Vidro: { hfDampingDb: 0.5, midDampingDb: 0.0, wetWidth: 0.90, wetMixMult: 1.2, hpfOffset: -20, lpfOffset: 4000 },
+    Tecido: { hfDampingDb: -5.5, midDampingDb: -1.5, wetWidth: 0.65, wetMixMult: 0.70, hpfOffset: 50, lpfOffset: -4000 },
+    Pedra: { hfDampingDb: -2.8, midDampingDb: -0.8, wetWidth: 0.70, wetMixMult: 0.95, hpfOffset: 20, lpfOffset: -2000 },
+    Metal: { hfDampingDb: 0.0, midDampingDb: 0.5, wetWidth: 0.85, wetMixMult: 1.15, hpfOffset: -10, lpfOffset: 1000 },
+    Carpete: { hfDampingDb: -6.0, midDampingDb: -2.0, wetWidth: 0.60, wetMixMult: 0.60, hpfOffset: 80, lpfOffset: -5000 }
   };
 
   useEffect(() => {
@@ -355,11 +355,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       setReverbMix(currentPreset.wetMix);
     }
 
+    const targetHpf = Math.min(20000, Math.max(20, currentPreset.wetHpf + (currentMat.hpfOffset || 0)));
+    const targetLpf = Math.min(20000, Math.max(20, currentPreset.wetLpf + (currentMat.lpfOffset || 0)));
+
     if (wetHpfRef.current && currentPreset.wetHpf && audioContextRef.current) {
-      wetHpfRef.current.frequency.setTargetAtTime(currentPreset.wetHpf, audioContextRef.current.currentTime, 0.1);
+      wetHpfRef.current.frequency.setTargetAtTime(targetHpf, audioContextRef.current.currentTime, 0.1);
     }
     if (wetLpfRef.current && currentPreset.wetLpf && audioContextRef.current) {
-      wetLpfRef.current.frequency.setTargetAtTime(currentPreset.wetLpf, audioContextRef.current.currentTime, 0.1);
+      wetLpfRef.current.frequency.setTargetAtTime(targetLpf, audioContextRef.current.currentTime, 0.1);
     }
     
     // Filtros de Material (Mid e HF Damping)
@@ -372,7 +375,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
     if (dryGainRef.current && dryGainRef.current.port) {
       dryGainRef.current.port.postMessage({ 
-         wetMix: reverbMix, 
+         wetMix: reverbMix * (currentMat.wetMixMult || 1.0), 
          preset: spatialMode,
          material: roomMaterial,
          preDelayMs: currentPreset.preDelayMs,
@@ -394,8 +397,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
       // Fallback nativo
-      dryGainRef.current.gain.setTargetAtTime(1.0 - reverbMix, audioContextRef.current.currentTime, 0.1);
-      wetGainRef.current.gain.setTargetAtTime(reverbMix, audioContextRef.current.currentTime, 0.1);
+      const fallbackWet = reverbMix * (currentMat.wetMixMult || 1.0);
+      dryGainRef.current.gain.setTargetAtTime(1.0 - fallbackWet, audioContextRef.current.currentTime, 0.1);
+      wetGainRef.current.gain.setTargetAtTime(fallbackWet, audioContextRef.current.currentTime, 0.1);
     }
   }, [reverbMix, spatialMode, roomMaterial]);
 
