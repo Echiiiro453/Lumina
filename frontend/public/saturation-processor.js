@@ -444,21 +444,10 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const fMid12 = this._f_mode(xMid12);
         const sat = (u1 >= 1.0) ? (F1_x - F1_x1) / d1 : (d1 / (eps1 * eps1)) * (3 - 2 * u1) * (F1_x - F1_x1) + (1 - w1) * fMid12;
 
-        // 5. Energy Conservation Loop (Loudness-Invariant Auto-Gain to prevent tonal/gain drift)
-        let rIn = this.rmsIn[ch];
-        let rOut = this.rmsOut[ch];
-        if (isNaN(rIn) || !isFinite(rIn)) rIn = 0.0;
-        if (isNaN(rOut) || !isFinite(rOut)) rOut = 0.0;
-
-        rIn  = rmsCoeff * rIn  + (1.0 - rmsCoeff) * (x * x);
-        rOut = rmsCoeff * rOut + (1.0 - rmsCoeff) * (sat * sat);
-        
-        this.rmsIn[ch] = rIn;
-        this.rmsOut[ch] = rOut;
-
-        const gainComp = Math.sqrt((rIn + 1e-5) / (rOut + 1e-5));
-        const safeGain = Math.max(0.1, Math.min(1.5, gainComp)); // Apertei a rédea do Auto-Gain
-        const satCompensated = sat * safeGain;
+        // 5. Static Makeup Gain (Loudness Compensation without Pumping)
+        // Em vez de AGC lento que causa pumping, usamos uma curva empírica estática que preserva a dinâmica natural
+        const staticMakeup = 1.0 / Math.sqrt(1.0 + this.drive * 4.0);
+        const satCompensated = sat * staticMakeup;
 
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
         // Safety Soft-Clipper para proteger o DAC da placa de som
