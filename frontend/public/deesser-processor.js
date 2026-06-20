@@ -27,9 +27,10 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.aRel = Math.exp(-1 / (sr * relMs / 1000));
     this.env  = 0;
 
-    // Threshold linear (mais sensível) e max GR (-10dB)
-    this.threshold = 0.025;
-    this.maxGR     = Math.pow(10, -10 / 20); // 0.316
+    // Classic Logarithmic Compressor Parameters
+    this.threshold = 0.032;
+    this.ratio = 2.5;
+    this.maxGR = Math.pow(10, -6.0 / 20); // Limite hard em -6.0dB (0.501)
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
@@ -74,12 +75,20 @@ class DeEsserProcessor extends AudioWorkletProcessor {
         ? this.aAtk * this.env + (1 - this.aAtk) * det
         : this.aRel * this.env + (1 - this.aRel) * det;
 
-      // Gain computation (soft knee)
+      // Classic Compressor Gain computation (Logarithmic Domain)
       let gain = 1.0;
       if (this.env > this.threshold) {
-        const excess = this.env / this.threshold;
-        const gr = 1.0 - (1.0 - this.maxGR) * Math.min(1.0, excess - 1.0);
-        gain = Math.max(this.maxGR, gr);
+        const envDb = 20 * Math.log10(this.env + 1e-12);
+        const threshDb = 20 * Math.log10(this.threshold + 1e-12);
+        
+        // excessDb é o quanto passou do Threshold
+        const excessDb = envDb - threshDb;
+        
+        // gainReductionDb = -excess * (1 - 1/Ratio)
+        const gainReductionDb = -excessDb * (1.0 - 1.0 / this.ratio);
+        
+        const grLinear = Math.pow(10, gainReductionDb / 20);
+        gain = Math.max(this.maxGR, grLinear); // Clamp em -6dB
       }
 
       for (let ch = 0; ch < input.length; ch++) {
