@@ -233,6 +233,7 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
         name: 'Spatial8D',
         mode: this.motionMode,
         azimuthDeg: panAngle.toFixed(0),
+        elevationDeg: "0",
         radiusM: this.radiusM.toFixed(1),
         speed: this.speed.toFixed(2) + 'x',
         inputCorr: inCorr.toFixed(2),
