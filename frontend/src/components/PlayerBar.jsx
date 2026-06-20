@@ -417,11 +417,22 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     if (submonoRef.current) submonoRef.current.port.postMessage({ active: enableSubmono });
   }, [enableSubmono]);
 
+  useEffect(() => {
+    if (panner8DRef.current && panner8DRef.current.parameters) {
+      const wetParam = panner8DRef.current.parameters.get('wet');
+      if (wetParam && audioContextRef.current) {
+        // Suaviza a transição de bypass em 10ms
+        wetParam.setTargetAtTime(enable8D ? 0.20 : 0.0, audioContextRef.current.currentTime, 0.01);
+      }
+    }
+  }, [enable8D]);
+
   // 8D Audio Motion System Loop
   useEffect(() => {
     if (!enable8D || motionMode === 'Parado') {
       if (panner8DRef.current && audioContextRef.current) {
-        panner8DRef.current.pan.setValueAtTime(0, audioContextRef.current.currentTime);
+        const param = panner8DRef.current.parameters ? panner8DRef.current.parameters.get('panAngle') : panner8DRef.current.pan;
+        if (param) param.setValueAtTime(0, audioContextRef.current.currentTime);
       }
       return;
     }
@@ -461,7 +472,16 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const maxPan = Math.min(1.0, motionRadius / 5.0);
       const targetPan = Math.max(-1.0, Math.min(1.0, pan * maxPan));
       
-      panner8DRef.current.pan.setValueAtTime(targetPan, audioContextRef.current.currentTime);
+      const param = panner8DRef.current.parameters ? panner8DRef.current.parameters.get('panAngle') : panner8DRef.current.pan;
+      if (param) {
+         if (panner8DRef.current.parameters) {
+             // O Spatial8D mapeia de -90 a 90 graus
+             param.setValueAtTime(targetPan * 90, audioContextRef.current.currentTime);
+         } else {
+             // Fallback para o StereoPanner antigo
+             param.setValueAtTime(targetPan, audioContextRef.current.currentTime);
+         }
+      }
       
       animationFrameId = requestAnimationFrame(updatePan);
     };
@@ -763,8 +783,21 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       }
       
       // 8D Binaural Stereo Panner
-      const panner8DNode = audioCtx.createStereoPanner();
-      panner8DNode.pan.value = 0.0;
+      let panner8DNode;
+      try {
+        await loadModule('/spatial8d-processor.js');
+        panner8DNode = new AudioWorkletNode(audioCtx, 'spatial8d');
+        const wetParam = panner8DNode.parameters.get('wet');
+        if (wetParam) wetParam.value = enable8D ? 0.20 : 0.0;
+        
+        panner8DNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        };
+      } catch (e) {
+        console.warn("Spatial 8D load failed", e);
+        panner8DNode = audioCtx.createStereoPanner();
+        panner8DNode.pan.value = 0.0;
+      }
       panner8DRef.current = panner8DNode;
 
       finalNode.connect(panner8DNode);
