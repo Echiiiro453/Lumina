@@ -32,6 +32,11 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     this._tailEnv = 0.0;
     this._sumEr = 0.0;
     this._sumTail = 0.0;
+    
+    // 85ms Delay Line para separação física da Cauda do Reverb
+    this._tailBufferL = new Float32Array(4096);
+    this._tailBufferR = new Float32Array(4096);
+    this._tailPtr = 0;
 
     function toFiniteNumber(v, fallback = 0) {
       const n = Number(v);
@@ -137,17 +142,27 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       sumWetMid += wMid * wMid;
       sumMixMid += yMid * yMid;
       
-      // ER vs Tail Estimation on Wet signal
-      const wetEnergy = wL * wL + wR * wR;
+      // Separação Acústica: ER vs Tail
+      // O ER captura a frente de onda bruta
+      const erEnergy = wL * wL + wR * wR;
+      
+      // O Tail captura o campo difuso 85ms depois
+      const dTailL = this._tailBufferL[this._tailPtr];
+      const dTailR = this._tailBufferR[this._tailPtr];
+      this._tailBufferL[this._tailPtr] = wL;
+      this._tailBufferR[this._tailPtr] = wR;
+      this._tailPtr = (this._tailPtr + 1) & 4095; // 4096 power of 2 mask
+      
+      const tailEnergy = dTailL * dTailL + dTailR * dTailR;
       
       // Early Reflections track the peak transient energy fast
-      if (wetEnergy > this._erEnv) {
-        this._erEnv = wetEnergy; 
+      if (erEnergy > this._erEnv) {
+        this._erEnv = erEnergy; 
       } else {
-        this._erEnv = 0.99 * this._erEnv + 0.01 * wetEnergy;
+        this._erEnv = 0.99 * this._erEnv + 0.01 * erEnergy;
       }
       
-      this._tailEnv = 0.999 * this._tailEnv + 0.001 * wetEnergy; // Slow follower (~200ms)
+      this._tailEnv = 0.999 * this._tailEnv + 0.001 * tailEnergy; // Slow follower (~200ms)
       
       sumEr += this._erEnv;
       sumTail += this._tailEnv;

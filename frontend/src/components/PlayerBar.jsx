@@ -324,7 +324,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const ROOM_PRESETS = {
     "Estúdio": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70 },
     "Club": { preDelayMs: 12, rt60: 1.2, wetMix: 0.11, wetWidth: 0.80 },
-    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.16, wetWidth: 0.85 },
+    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.12, wetWidth: 0.80 },
     "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90 },
     "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15, wetWidth: 0.85 },
     "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65 },
@@ -774,18 +774,23 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
       reverbNodeRef.current = convolver;
       
-      // HPF de proteção para a cauda do Reverb
+      // Filtros de Proteção para a cauda do Reverb (HPF 150Hz, LPF 10kHz)
       const wetHpf = audioCtx.createBiquadFilter();
       wetHpf.type = 'highpass';
-      wetHpf.frequency.value = 150; // Corta graves embolados no reverb
+      wetHpf.frequency.value = 150; 
+      
+      const wetLpf = audioCtx.createBiquadFilter();
+      wetLpf.type = 'lowpass';
+      wetLpf.frequency.value = 10000;
       
       mbWidthNode.connect(convolver);
       convolver.connect(wetHpf);
+      wetHpf.connect(wetLpf);
       
       if (roomTelemetryNode.numberOfInputs === 2) {
-         wetHpf.connect(roomTelemetryNode, 0, 1);
+         wetLpf.connect(roomTelemetryNode, 0, 1);
       } else {
-         wetHpf.connect(wetGainRef.current);
+         wetLpf.connect(wetGainRef.current);
          wetGainRef.current.connect(roomTelemetryNode);
       }
 
