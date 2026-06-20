@@ -745,21 +745,17 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       
       mbWidthNode.connect(roomTelemetryNode, 0, 0);
       
-      // Convolver Engine (Desconectado fisicamente quando Mix = 0 para salvar 30% da CPU)
-      if (reverbMix > 0.01) {
-        const convolver = audioCtx.createConvolver();
-        convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
-        reverbNodeRef.current = convolver;
-        
-        mbWidthNode.connect(convolver);
-        if (roomTelemetryNode.numberOfInputs === 2) {
-           convolver.connect(roomTelemetryNode, 0, 1);
-        } else {
-           convolver.connect(wetGainRef.current);
-           wetGainRef.current.connect(roomTelemetryNode);
-        }
+      // Convolver Engine (Sempre conectado para alimentar Input 1 do Telemetry Node)
+      const convolver = audioCtx.createConvolver();
+      convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
+      reverbNodeRef.current = convolver;
+      
+      mbWidthNode.connect(convolver);
+      if (roomTelemetryNode.numberOfInputs === 2) {
+         convolver.connect(roomTelemetryNode, 0, 1);
       } else {
-        reverbNodeRef.current = null;
+         convolver.connect(wetGainRef.current);
+         wetGainRef.current.connect(roomTelemetryNode);
       }
 
       // --- Mastering & LUFS ---

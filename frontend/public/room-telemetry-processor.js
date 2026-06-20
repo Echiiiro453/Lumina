@@ -32,12 +32,17 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     this._sumEr = 0.0;
     this._sumTail = 0.0;
 
+    function toFiniteNumber(v, fallback = 0) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
     this.port.onmessage = (e) => {
       const d = e.data || {};
       if (d.preset !== undefined) this.preset = d.preset;
-      if (Number.isFinite(d.preDelayMs)) this.preDelayMs = d.preDelayMs;
-      if (Number.isFinite(d.rt60)) this.rt60 = d.rt60;
-      if (Number.isFinite(d.wetMix)) this.wetMix = Math.min(1, Math.max(0, d.wetMix));
+      if (d.preDelayMs !== undefined) this.preDelayMs = toFiniteNumber(d.preDelayMs, this.preDelayMs);
+      if (d.rt60 !== undefined) this.rt60 = toFiniteNumber(d.rt60, this.rt60);
+      if (d.wetMix !== undefined) this.wetMix = Math.min(1, Math.max(0, toFiniteNumber(d.wetMix, this.wetMix)));
       if (d.active !== undefined) this.active = !!d.active;
     };
   }
