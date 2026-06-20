@@ -76,6 +76,7 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     
     // Trackers para o bloco atual
     let blockMaxAmp = 0;
+    let blockPowerSum = 0;
     const sampleCount = inL.length;
     let minK = 1.0;
     let sumBand = 0;
