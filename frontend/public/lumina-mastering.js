@@ -105,21 +105,22 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
       } else {
         rejectReason = "rejected_crest_worse";
       }
+      this._dbgCrestBefore = crestBefore;
+      this._dbgCrestAfterCand = crestAfterCandidate;
+      this._dbgPeakReductionCand = peakReductionDb;
+      this._dbgAccepted = accepted;
+      this._dbgRejectReason = rejectReason;
     }
     
     // Pass 2: Output Selection & Limiting
-    const targetMix = accepted ? 1.0 : 0.0;
-    const mixSmoothing = 0.1; // 10 samples micro-crossfade to prevent clicks
-    
     for (let i = 0; i < blockSize; ++i) {
       let maxTP = 0;
-      this.currentRotMix += mixSmoothing * (targetMix - this.currentRotMix);
       
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
         
-        if (this.enablePhaseRotation) {
-           sample = sample * (1.0 - this.currentRotMix) + this.rotatedBuffer[ch][i] * this.currentRotMix;
+        if (this.enablePhaseRotation && accepted) {
+           sample = this.rotatedBuffer[ch][i];
         }
         
         blockSamples[ch] = sample;
@@ -203,40 +204,19 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     }
     
     if (this.enablePhaseRotation) {
-      this._dbgPeakIn = Math.max(this._dbgPeakIn || 0, blockPeakIn);
-      this._dbgPeakRot = Math.max(this._dbgPeakRot || 0, blockPeakRot);
-      this._dbgRms = (this._dbgRms || 0) + blockRmsIn;
-      this._dbgAcceptedCount = (this._dbgAcceptedCount || 0) + (accepted ? 1 : 0);
       this._telemetryCount = (this._telemetryCount || 0) + 1;
       
-      // Armazena a última razão de rejeição
-      if (!accepted) this._lastRejectReason = rejectReason;
-      
       if (this._telemetryCount >= 60) {
-        const samples = 60 * blockSize * numChannels;
-        const rms = Math.sqrt(this._dbgRms / samples) + 1e-12;
-        
-        const cBefore = this._dbgPeakIn / rms;
-        const cAfterCand = this._dbgPeakRot / rms;
-        const pRedCandDb = 20 * Math.log10((this._dbgPeakRot + 1e-12) / (this._dbgPeakIn + 1e-12));
-        
-        const wasAccepted = this._dbgAcceptedCount > 30; // Se foi aceito na maioria dos blocos
-        const finalReason = wasAccepted ? "none" : (this._lastRejectReason || "rejected");
-        
         this.port.postMessage({
           type: 'telemetry',
           name: 'PhaseRot',
-          crestBefore: cBefore.toFixed(1),
-          crestAfterCandidate: cAfterCand.toFixed(1),
-          peakReductionCandidate: pRedCandDb.toFixed(1) + 'dB',
-          accepted: wasAccepted,
-          reason: finalReason
+          crestBefore: (this._dbgCrestBefore || 0).toFixed(1),
+          crestAfterCandidate: (this._dbgCrestAfterCand || 0).toFixed(1),
+          peakReductionCandidate: (this._dbgPeakReductionCand || 0).toFixed(1) + 'dB',
+          accepted: !!this._dbgAccepted,
+          reason: this._dbgRejectReason || "none"
         });
         
-        this._dbgPeakIn = 0;
-        this._dbgPeakRot = 0;
-        this._dbgRms = 0;
-        this._dbgAcceptedCount = 0;
         this._telemetryCount = 0;
       }
     }
