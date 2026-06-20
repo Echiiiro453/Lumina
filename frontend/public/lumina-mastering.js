@@ -24,10 +24,10 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     // Buffers de história de 4 amostras para Interpolação Hermite 4x (True Peak detection)
     this.history = Array.from({ length: MAX_CH }, () => new Float32Array(4));
     
-    // Phase Rotator: cascata de 4 filtros passa-tudo (All-Pass Filters) de 1ª ordem
-    this.apfCoeffs = [0.92, 0.92, 0.88, 0.88];
-    this.apfStateX = Array.from({ length: MAX_CH }, () => new Float32Array(4));
-    this.apfStateY = Array.from({ length: MAX_CH }, () => new Float32Array(4));
+    // Phase Rotator: cascata de 2 filtros passa-tudo (All-Pass Filters) de 1ª ordem para Música (Gentle)
+    this.apfCoeffs = [0.85, 0.85];
+    this.apfStateX = Array.from({ length: MAX_CH }, () => new Float32Array(2));
+    this.apfStateY = Array.from({ length: MAX_CH }, () => new Float32Array(2));
     this.rotatedBuffer = Array.from({ length: MAX_CH }, () => new Float32Array(128));
     this.currentRotMix = 0.0;
     
@@ -67,7 +67,7 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
           const stateX = this.apfStateX[ch];
           const stateY = this.apfStateY[ch];
           let y_rot = sample;
-          for (let stage = 0; stage < 4; ++stage) {
+          for (let stage = 0; stage < 2; ++stage) {
             const g = this.apfCoeffs[stage];
             const y = -g * y_rot + stateX[stage] + g * stateY[stage];
             stateX[stage] = y_rot;
