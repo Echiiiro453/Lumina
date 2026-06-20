@@ -434,12 +434,47 @@ class SaturationProcessor extends AudioWorkletProcessor {
         // Safety Soft-Clipper para proteger o DAC da placa de som
         outCh[i] = Math.tanh(finalSignal);
         
+        if (ch === 0) {
+          this._dbgIn = (this._dbgIn || 0) + xOrigSafe * xOrigSafe;
+          this._dbgOut = (this._dbgOut || 0) + outCh[i] * outCh[i];
+          const diff = outCh[i] - xOrigSafe;
+          this._dbgDiff = (this._dbgDiff || 0) + diff * diff;
+          this._dbgWet = (this._dbgWet || 0) + satCompensated * satCompensated;
+          this._dbgSamples = (this._dbgSamples || 0) + 1;
+        }
+
         x2 = x1;
         x1 = xFeed;
       }
       chHist[0] = x1;
       chHist[1] = x2;
     }
+
+    this.frameCount = (this.frameCount || 0) + 1;
+    if (this.frameCount % 86 === 0 && this._dbgSamples > 0) { // ~ a cada 250ms
+      const inRMS = Math.sqrt(this._dbgIn / this._dbgSamples);
+      const outRMS = Math.sqrt(this._dbgOut / this._dbgSamples);
+      const diffRMS = Math.sqrt(this._dbgDiff / this._dbgSamples);
+      const wetRMS = Math.sqrt(this._dbgWet / this._dbgSamples);
+
+      this.port.postMessage({
+        type: 'telemetry',
+        name: 'Saturation',
+        inRMS: inRMS.toFixed(6),
+        outRMS: outRMS.toFixed(6),
+        diffRMS: diffRMS.toFixed(6),
+        wetRMS: wetRMS.toFixed(6),
+        gainDelta: (outRMS / (inRMS + 1e-12)).toFixed(3),
+        params: { drive: this.drive, mix: this.mix, mode: this.mode }
+      });
+
+      this._dbgIn = 0;
+      this._dbgOut = 0;
+      this._dbgDiff = 0;
+      this._dbgWet = 0;
+      this._dbgSamples = 0;
+    }
+
     return true;
   }
 }

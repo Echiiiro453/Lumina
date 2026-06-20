@@ -613,6 +613,12 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
 
+      saturationNode.port.onmessage = (e) => {
+        if (e.data.type === 'telemetry') {
+          logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        }
+      };
+
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
