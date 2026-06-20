@@ -195,10 +195,10 @@ class SaturationProcessor extends AudioWorkletProcessor {
       // Pink noise filter states
       this.pinkB0 = new Float32Array(chs);
       this.pinkB1 = new Float32Array(chs);
-      this.pinkB2 = new Float32Array(chs);
-      
       this.dcBlockX = new Float32Array(chs);
       this.dcBlockY = new Float32Array(chs);
+      this.postDcX = new Float32Array(chs);
+      this.postDcY = new Float32Array(chs);
       this.fastRmsIn = new Float32Array(chs);
     }
 
@@ -393,9 +393,9 @@ class SaturationProcessor extends AudioWorkletProcessor {
         }
 
         // DC Blocker (Simulates Playback Head Inductive Derivative)
-        // 0. Pre-Saturation High-Pass Filter (fc ~ 40Hz)
+        // 0. Pre-Saturation High-Pass Filter (fc ~ 35Hz)
         // Corta os subgraves antes de entrarem na válvula para evitar "fuzz" rasgado por intermodulação
-        const R = 1 - (Math.PI * 2 * 40.0) / 48000; // Aproximação de 1-polo para 48kHz
+        const R = 1 - (Math.PI * 2 * 35.0) / 48000; // Aproximação de 1-polo para 48kHz
         const dcBlockLastIn = this.dcBlockX[ch];
         this.dcBlockX[ch] = xOrigSafe;
         this.dcBlockY[ch] = xOrigSafe - dcBlockLastIn + R * this.dcBlockY[ch];
@@ -452,8 +452,16 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const satCompensated = sat * staticMakeup;
 
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
+
+        // 6. Post-Saturation DC Blocker (fc ~ 20Hz)
+        // Válvulas assimétricas geram DC bias pesado. Removemos para proteger o headroom e evitar clique no DAC.
+        const R_post = 1 - (Math.PI * 2 * 20.0) / 48000;
+        const postDcLastIn = this.postDcX[ch];
+        this.postDcX[ch] = finalSignal;
+        this.postDcY[ch] = finalSignal - postDcLastIn + R_post * this.postDcY[ch];
+        
         // Safety Soft-Clipper para proteger o DAC da placa de som
-        outCh[i] = Math.tanh(finalSignal);
+        outCh[i] = Math.tanh(this.postDcY[ch]);
         
         if (ch === 0) {
           this._dbgIn = (this._dbgIn || 0) + xOrigSafe * xOrigSafe;
