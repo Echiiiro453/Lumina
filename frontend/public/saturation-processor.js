@@ -367,52 +367,23 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
 
         const d1 = xFeed - x1;
-        const d2 = x1 - x2;
-        const d3 = xFeed - x2;
-
         const absD1 = Math.abs(d1);
-        const absD2 = Math.abs(d2);
-        const absD3 = Math.abs(d3);
         
-        // Acceleration / Curvature parameter
-        const absD2x = Math.abs(xFeed - 2 * x1 + x2);
-
-        // Scale-Normalized Adaptive Thresholds with relaxed tolerance to prevent division by zero instability
+        // Adaptive Thresholds
         const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
-        const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-6;
-        
         const eps1 = 1e-3 * env + 1e-5;
-        const eps2 = 1e-3 * envPrev + 1e-5;
-        const eps3 = 1e-3 * env + 1e-3 * absD2x + 1e-5;
 
-        // 3. Pre-evaluate antiderivative levels (Unified F2)
-        const F2_x  = this._F2_mode(xFeed);
-        const F2_x1 = this._F2_mode(x1);
-        const F2_x2 = this._F2_mode(x2);
-
+        // 3. Pre-evaluate 1st-order antiderivative levels (ADAA1)
         const F1_x  = this._F1_mode(xFeed);
         const F1_x1 = this._F1_mode(x1);
 
         const xMid12 = 0.5 * (xFeed + x1);
-        const xMid23 = 0.5 * (x1 + x2);
+        const fMid12 = this._f_mode(xMid12);
 
-        const F1_mid12 = this._F1_mode(xMid12);
-        const F1_mid23 = this._F1_mode(xMid23);
-
-        // 4. Compute smooth first-order finite differences of F2
-        const Y1 = this._smoothDiffF2(xFeed, x1, F2_x, F2_x1, F1_mid12, eps1);
-        const Y2 = this._smoothDiffF2(x1, x2, F2_x1, F2_x2, F1_mid23, eps2);
-
-        // 5. Compute smooth ADAA1 fallback path (gates when d1 -> 0)
+        // 4. Compute smooth ADAA1 output path
         const u1 = Math.min(1.0, absD1 / eps1);
         const w1 = u1 * u1 * (3 - 2 * u1);
-        const fMid12 = this._f_mode(xMid12);
-        const y_ADAA1 = (u1 >= 1.0) ? (F1_x - F1_x1) / d1 : (d1 / (eps1 * eps1)) * (3 - 2 * u1) * (F1_x - F1_x1) + (1 - w1) * fMid12;
-
-        // 6. Compute smooth ADAA2 output path via implicit crossfading (gates when d3 -> 0)
-        const u3 = Math.min(1.0, absD3 / eps3);
-        const w3 = u3 * u3 * (3 - 2 * u3);
-        const sat = (u3 >= 1.0) ? 2.0 * (Y1 - Y2) / d3 : 2.0 * (d3 / (eps3 * eps3)) * (3 - 2 * u3) * (Y1 - Y2) + (1 - w3) * y_ADAA1;
+        const sat = (u1 >= 1.0) ? (F1_x - F1_x1) / d1 : (d1 / (eps1 * eps1)) * (3 - 2 * u1) * (F1_x - F1_x1) + (1 - w1) * fMid12;
 
         // 7. Energy Conservation Loop (Loudness-Invariant Auto-Gain to prevent tonal/gain drift)
         let rIn = this.rmsIn[ch];
