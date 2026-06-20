@@ -82,21 +82,24 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
       }
     }
     
-    // Smart Accept/Reject Decision
+    // Smart Accept/Reject Decision with Minimum Improvement Margin (0.15 Crest Factor)
     let targetRotMix = 0.0;
     if (this.enablePhaseRotation) {
-      // Accept only if rotation improved headroom (lowered the peak)
-      if (blockPeakOut < blockPeakIn - 1e-4) {
+      const blockRms = Math.sqrt(blockRmsIn / (blockSize * numChannels));
+      if (blockPeakOut < blockPeakIn - 0.15 * blockRms) {
         targetRotMix = 1.0;
       }
     }
     
     // Pass 2: Apply Smart Crossfade, True Peak Detection and Limiting
     const mixSmoothing = 0.05; // ~20 samples transition to prevent clicks
+    let finalBlockPeak = 0;
+    let sumTargetMix = 0;
     
     for (let i = 0; i < blockSize; ++i) {
       let maxTP = 0;
       this.currentRotMix += mixSmoothing * (targetRotMix - this.currentRotMix);
+      sumTargetMix += this.currentRotMix;
       
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
@@ -104,6 +107,9 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
         if (this.enablePhaseRotation) {
            sample = sample * (1.0 - this.currentRotMix) + this.rotatedBuffer[ch][i] * this.currentRotMix;
         }
+        
+        const absMix = Math.abs(sample);
+        if (absMix > finalBlockPeak) finalBlockPeak = absMix;
         
         blockSamples[ch] = sample;
         
@@ -187,8 +193,9 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     
     if (this.enablePhaseRotation) {
       this._dbgPeakIn = Math.max(this._dbgPeakIn || 0, blockPeakIn);
-      this._dbgPeakOut = Math.max(this._dbgPeakOut || 0, blockPeakOut);
+      this._dbgPeakOut = Math.max(this._dbgPeakOut || 0, finalBlockPeak);
       this._dbgRms = (this._dbgRms || 0) + blockRmsIn;
+      this._dbgMixSum = (this._dbgMixSum || 0) + (sumTargetMix / blockSize);
       this._telemetryCount = (this._telemetryCount || 0) + 1;
       
       if (this._telemetryCount >= 60) {
@@ -199,6 +206,7 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
         const crestAfter = this._dbgPeakOut / rms;
         
         const peakReductionDb = 20 * Math.log10((this._dbgPeakOut + 1e-12) / (this._dbgPeakIn + 1e-12));
+        const avgMix = this._dbgMixSum / 60;
         
         this.port.postMessage({
           type: 'telemetry',
@@ -206,12 +214,13 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
           crestBefore: crestBefore.toFixed(1),
           crestAfter: crestAfter.toFixed(1),
           peakReduction: peakReductionDb.toFixed(1) + 'dB',
-          triggered: true
+          triggered: avgMix > 0.05
         });
         
         this._dbgPeakIn = 0;
         this._dbgPeakOut = 0;
         this._dbgRms = 0;
+        this._dbgMixSum = 0;
         this._telemetryCount = 0;
       }
     }
