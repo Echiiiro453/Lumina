@@ -30,6 +30,11 @@ class DepthProcessor extends AudioWorkletProcessor {
     this.midEnvFast = 0.0;
     this.midEnvSlow = 0.0;
     
+    // Telemetry Accumulators
+    this._telemetryCount = 0;
+    this._sumDiff = 0;
+    this._sumTransientAtt = 0;
+    
     this.port.onmessage = (e) => {
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.depth !== undefined) this.depth = Math.max(0.0, Math.min(e.data.depth, 1.0));
@@ -113,8 +118,41 @@ class DepthProcessor extends AudioWorkletProcessor {
       const transientSoftMid = processedMid * transientGain;
       
       // 5. Reconstruir L/R
-      outL[i] = (transientSoftMid + delayedSide) * 0.70710678;
-      outR[i] = (transientSoftMid - delayedSide) * 0.70710678;
+      const finalL = (transientSoftMid + delayedSide) * 0.70710678;
+      const finalR = (transientSoftMid - delayedSide) * 0.70710678;
+      
+      outL[i] = finalL;
+      outR[i] = finalR;
+      
+      // Accumulate for telemetry
+      this._sumDiff += (finalL - L) * (finalL - L) + (finalR - R) * (finalR - R);
+      this._sumTransientAtt += (1.0 - transientGain);
+    }
+    
+    // Disparar telemetria a cada 60 blocos
+    this._telemetryCount++;
+    if (this._telemetryCount >= 60) {
+      const N = 60 * size;
+      const diffRMS = Math.sqrt(this._sumDiff / (N * 2));
+      const avgTransientSmooth = this._sumTransientAtt / N;
+      const preDelayMs = (this.depth * 600.0 / this.sampleRate) * 1000.0;
+      const airAbsorptionDb = -6.0 * this.depth;
+      const hfLossDb = -3.0 * this.depth; // Uma estimativa simplificada
+      
+      this.port.postMessage({
+        type: 'telemetry',
+        name: 'Depth',
+        depth: this.depth.toFixed(2),
+        preDelayMs: preDelayMs.toFixed(1),
+        airAbsorptionDb: airAbsorptionDb.toFixed(1),
+        transientSmooth: avgTransientSmooth.toFixed(3),
+        hfLossDb: hfLossDb.toFixed(1),
+        diffRMS: diffRMS.toFixed(3)
+      });
+      
+      this._telemetryCount = 0;
+      this._sumDiff = 0;
+      this._sumTransientAtt = 0;
     }
     
     return true;

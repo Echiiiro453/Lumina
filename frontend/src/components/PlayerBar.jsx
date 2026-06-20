@@ -701,6 +701,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/depth-processor.js');
         const depthNode = new AudioWorkletNode(audioCtx, 'depth');
         depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
+        depthNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        };
         depthRef.current = depthNode;
         exciterNode.connect(depthNode);
         nextNodeAfterExciter = depthNode;
