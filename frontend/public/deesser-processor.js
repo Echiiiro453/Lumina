@@ -27,9 +27,9 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.aRel = Math.exp(-1 / (sr * relMs / 1000));
     this.env  = 0;
 
-    // Threshold linear (~-22dBFS in the sibilance band) and max GR (-6dB)
-    this.threshold = 0.08;
-    this.maxGR     = Math.pow(10, -6 / 20); // 0.501
+    // Threshold linear (mais sensível) e max GR (-10dB)
+    this.threshold = 0.025;
+    this.maxGR     = Math.pow(10, -10 / 20); // 0.316
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
