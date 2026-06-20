@@ -57,7 +57,8 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     const input = inputs[0], output = outputs[0];
     if (!input || !input[0]) return true;
 
-    let sumIn = 0, sumBand = 0;
+    let sumIn = 0;
+    let maxEnv = 0;
     let minGain = 1.0;
 
     for (let i = 0; i < input[0].length; i++) {
@@ -68,12 +69,12 @@ class DeEsserProcessor extends AudioWorkletProcessor {
 
       sumIn += monoSample * monoSample;
       const detVal = this._bq(monoSample, this.bpf, this.detZ);
-      sumBand += detVal * detVal;
-      
       const det = Math.abs(detVal);
       this.env = det > this.env
         ? this.aAtk * this.env + (1 - this.aAtk) * det
         : this.aRel * this.env + (1 - this.aRel) * det;
+        
+      if (this.env > maxEnv) maxEnv = this.env;
 
       // Classic Compressor Gain computation (Logarithmic Domain)
       let gain = 1.0;
@@ -99,28 +100,28 @@ class DeEsserProcessor extends AudioWorkletProcessor {
 
     if (this.active) {
       this._dbgIn = (this._dbgIn || 0) + sumIn;
-      this._dbgBand = (this._dbgBand || 0) + sumBand;
+      this._dbgMaxEnv = Math.max(this._dbgMaxEnv || 0, maxEnv);
       this._dbgMinGain = Math.min(this._dbgMinGain || 1.0, minGain);
       this._telemetryCount = (this._telemetryCount || 0) + 1;
       
       if (this._telemetryCount >= 60) {
         const samples = 60 * input[0].length;
         const inRMS = Math.sqrt(this._dbgIn / samples);
-        const bandRMS = Math.sqrt(this._dbgBand / samples);
+        const peakEnv = this._dbgMaxEnv;
         const gainReductionDb = 20 * Math.log10(this._dbgMinGain + 1e-12);
         
         this.port.postMessage({
           type: 'telemetry',
           name: 'DeEsser',
           inRMS: inRMS.toFixed(3),
-          bandRMS: bandRMS.toFixed(3),
+          peakEnv: peakEnv.toFixed(3),
           gainReduction: gainReductionDb.toFixed(1) + 'dB',
           threshold: this.threshold.toFixed(3),
           triggered: this._dbgMinGain < 0.99
         });
         
         this._dbgIn = 0;
-        this._dbgBand = 0;
+        this._dbgMaxEnv = 0;
         this._dbgMinGain = 1.0;
         this._telemetryCount = 0;
       }
