@@ -61,18 +61,18 @@ export function AudioDiagnosticsPanel({
           icon: 'cf',
         },
         {
-          label: 'Harmonic Exciter',
+          label: 'Harmonic Exciter (Worklet)',
           ok: !!exciterNodeRef?.current,
           detail: exciterNodeRef?.current
-            ? `WaveShaper oversample: ${exciterNodeRef.current.oversample} | curve len: ${exciterNodeRef.current.curve?.length ?? 0}`
+            ? 'Processador Paralelo ADAA Ativo'
             : 'não inicializado',
           icon: 'exc',
         },
         {
-          label: 'Stereo Width (M/S)',
+          label: 'Stereo Width (Worklet)',
           ok: !!stereoWidthRef?.current,
           detail: stereoWidthRef?.current
-            ? `sideBus gain: ${stereoWidthRef.current.gain?.value?.toFixed(2)}`
+            ? 'Crossover TPT M/S Ativo'
             : 'não inicializado',
           icon: 'sw',
         },

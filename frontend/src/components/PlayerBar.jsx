@@ -490,10 +490,23 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const bassShaper = audioCtx.createWaveShaper();
       const bassCurve = new Float32Array(512);
       const bassAmount = 5.0;
+      let maxVal = 0.0;
+      
+      // Gera a curva bruta
       for (let i = 0; i < 512; i++) {
-        let x = (i * 2) / 512 - 1;
-        bassCurve[i] = x + bassAmount * (x - (x * x * x) / 3);
+        let x = (i * 2) / 511 - 1; // 511 garante -1.0 a +1.0 exatos
+        let y = x + bassAmount * (x - (x * x * x) / 3);
+        bassCurve[i] = y;
+        if (Math.abs(y) > maxVal) maxVal = Math.abs(y);
       }
+      
+      // Normaliza estritamente para [-1.0, 1.0] para não explodir o filtro de Oversampling do Chromium
+      if (maxVal > 0) {
+        for (let i = 0; i < 512; i++) {
+          bassCurve[i] /= maxVal;
+        }
+      }
+      
       bassShaper.curve = bassCurve;
       bassShaper.oversample = '4x';
       bassShaperRef.current = bassShaper;
