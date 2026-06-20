@@ -138,6 +138,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const stereoWidthRef = useRef(null);
   const bassEnhancerGainRef = useRef(null);
   const bassShaperRef = useRef(null);
+  const preGainRef = useRef(null);
+  const limiterRef = useRef(null);
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
   const crossfadeTimeoutRef = useRef(null);
@@ -480,6 +482,26 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     if (deesserRef.current) deesserRef.current.port.postMessage({ active: enableDeesser });
   }, [enableDeesser]);
 
+  // --- Master Safety & Headroom Compensation ---
+  useEffect(() => {
+    let headroomDb = -6.0; // Padrão seguro para cadeia de múltiplos efeitos
+
+    if (bassEnhancer) headroomDb -= 1.5;
+    if (enableSaturation) headroomDb -= 1.0;
+    if (reverbMix > 0) headroomDb -= 0.8;
+    if (enable8D) headroomDb -= 0.8;
+    
+    let maxEqBoost = 0;
+    for (let i = 0; i < eqGains.length; i++) {
+      if (eqGains[i] > maxEqBoost) maxEqBoost = eqGains[i];
+    }
+    if (maxEqBoost > 3) headroomDb -= 1.5;
+
+    if (preGainRef.current && audioContextRef.current) {
+      preGainRef.current.gain.setTargetAtTime(Math.pow(10, headroomDb / 20), audioContextRef.current.currentTime, 0.15);
+    }
+  }, [bassEnhancer, enableSaturation, reverbMix, enable8D, eqGains]);
+
   useEffect(() => {
     if (deharshRef.current) deharshRef.current.port.postMessage({ active: enableDeharsh });
   }, [enableDeharsh]);
@@ -675,6 +697,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       // Worklet anchor pre/post
       const preNode = audioCtx.createGain();
+      preGainRef.current = preNode;
       const postNode = audioCtx.createGain();
       workletAnchorRef.current = { pre: preNode, post: postNode };
 
@@ -993,9 +1016,49 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       }
       panner8DRef.current = panner8DNode;
 
+      // Master Safety Limiter
+      const limiterNode = audioCtx.createDynamicsCompressor();
+      limiterNode.threshold.value = -1.0;
+      limiterNode.knee.value = 0.0;
+      limiterNode.ratio.value = 20.0;
+      limiterNode.attack.value = 0.005; // 5ms lookahead
+      limiterNode.release.value = 0.080; // 80ms
+      limiterRef.current = limiterNode;
+
+      let truePeakNode = limiterNode;
+      try {
+        await loadModule('/master-out-processor.js');
+        truePeakNode = new AudioWorkletNode(audioCtx, 'master-out');
+        truePeakNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') {
+            const data = e.data;
+            let reductionDb = 0.0;
+            if (limiterRef.current && limiterRef.current.reduction !== undefined) {
+              reductionDb = typeof limiterRef.current.reduction === 'number' ? limiterRef.current.reduction : limiterRef.current.reduction.value;
+            }
+            const preGainDb = 20 * Math.log10(preGainRef.current ? preGainRef.current.gain.value : 1.0);
+            
+            logToCMD("DSP-MasterOut", JSON.stringify({
+              type: "telemetry",
+              name: "MasterOut",
+              headroomDb: preGainDb.toFixed(1),
+              preGain: (preGainRef.current ? preGainRef.current.gain.value : 1.0).toFixed(3),
+              peakDb: data.peakDb,
+              clipCount: data.clipCount,
+              limiterReductionDb: (typeof reductionDb === 'number' ? Math.abs(reductionDb) : 0).toFixed(1),
+              volume: audioRef.current ? audioRef.current.volume.toFixed(2) : "1.00"
+            }), data.clipCount > 0 ? "error" : "success");
+          }
+        };
+        limiterNode.connect(truePeakNode);
+      } catch (e) {
+        console.warn("Master Out / Peak Guard load failed", e);
+      }
+
       finalNode.connect(panner8DNode);
       panner8DNode.connect(analyser);
-      analyser.connect(audioCtx.destination);
+      analyser.connect(limiterNode);
+      truePeakNode.connect(audioCtx.destination);
       
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
