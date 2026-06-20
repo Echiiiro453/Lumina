@@ -191,10 +191,10 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
 
       const dryRMS = Math.sqrt(this._drySq / nCh);
       const wetRMS = Math.sqrt(this._wetSq / nCh);
+      const drySilent = dryRMS < 0.0001;
+      const wetSilent = wetRMS < 0.0001;
       
-      const hasSignal = dryRMS > 0.00001 || wetRMS > 0.00001;
-      
-      if (!hasSignal) {
+      if (drySilent && wetSilent) {
         // Envia log silencioso para limpar UI e não calcula Mono Loss falso
         this.port.postMessage({
           type: "telemetry",
@@ -203,6 +203,8 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
           material: this.material,
           active: this.active,
           hasSignal: false,
+          tailResidual: false,
+          validMonoLoss: false,
           dryRMS: "0.000",
           wetRMS: "0.000",
           earlyReflections: "0.000",
@@ -224,18 +226,27 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       const erRMS = Math.sqrt(this._sumEr / nCh);
       const tailRMS = Math.sqrt(this._sumTail / nCh);
 
-      const dryMonoEnergy = Math.sqrt(this._sumDryMid / nTotal) + 1e-12;
-      const mixMonoEnergy = Math.sqrt(this._sumMixMid / nTotal) + 1e-12;
-      
-      const monoLossDb = 20 * Math.log10(mixMonoEnergy / dryMonoEnergy);
-
-      // Auto-Ducking Protection for critical Mono Loss
+      let monoLossDb = 0.0;
+      let validMonoLoss = true;
       let duckedWetMix = wetMix;
-      if (monoLossDb < -1.5) {
-        this.wetMix *= 0.92;
-        this.wetWidth *= 0.95;
-        duckedWetMix = this.wetMix;
+
+      if (drySilent) {
+        monoLossDb = 0.0;
+        validMonoLoss = false;
+      } else {
+        const dryMonoEnergy = Math.sqrt(this._sumDryMid / nTotal) + 1e-12;
+        const mixMonoEnergy = Math.sqrt(this._sumMixMid / nTotal) + 1e-12;
+        monoLossDb = 20 * Math.log10(mixMonoEnergy / dryMonoEnergy);
+
+        // Auto-Ducking Protection for critical Mono Loss
+        if (monoLossDb < -1.5) {
+          this.wetMix *= 0.92;
+          this.wetWidth *= 0.95;
+          duckedWetMix = this.wetMix;
+        }
       }
+
+      const tailResidual = drySilent && !wetSilent;
 
       this.port.postMessage({
         type: "telemetry",
@@ -243,7 +254,9 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         preset: this.preset,
         material: this.material,
         active: this.active,
-        hasSignal: true,
+        hasSignal: !drySilent,
+        tailResidual: tailResidual,
+        validMonoLoss: validMonoLoss,
         preDelayMs: Number(this.preDelayMs).toString(),
         rt60: Number(this.rt60).toString() + "s",
         wetMix: duckedWetMix.toFixed(2),
@@ -251,7 +264,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         wetRMS: wetRMS.toFixed(3),
         earlyReflections: erRMS.toFixed(3),
         tailRMS: tailRMS.toFixed(3),
-        monoLossDb: monoLossDb.toFixed(1)
+        monoLossDb: validMonoLoss ? monoLossDb.toFixed(1) : "0.0"
       });
 
       this._frames = 0;
