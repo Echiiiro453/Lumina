@@ -97,11 +97,22 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         const d = dryCh ? dryCh[i] : 0.0;
         const w = wetCh ? wetCh[i] : 0.0;
 
+        // Proteção de Largura Estéreo no Reverb (Width: 0.80)
+        let fW_L = w;
+        let fW_R = w;
+        if (output.length > 1) {
+           const wMid = (wL + wR) * 0.5;
+           const wSide = (wL - wR) * 0.5 * 0.80; // Corta side em 20%
+           fW_L = wMid + wSide;
+           fW_R = wMid - wSide;
+        }
+
         let y;
         if (!this.active) {
           y = d;
         } else {
-          y = d * dryGain + w * wetGain;
+          const finalW = (ch === 0) ? fW_L : fW_R;
+          y = d * dryGain + finalW * wetGain;
         }
         if (!Number.isFinite(y)) y = 0.0;
 
@@ -126,7 +137,14 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       
       // ER vs Tail Estimation on Wet signal
       const wetEnergy = wL * wL + wR * wR;
-      this._erEnv = 0.95 * this._erEnv + 0.05 * wetEnergy; // Fast follower (~10ms)
+      
+      // Early Reflections track the peak transient energy fast
+      if (wetEnergy > this._erEnv) {
+        this._erEnv = wetEnergy; 
+      } else {
+        this._erEnv = 0.99 * this._erEnv + 0.01 * wetEnergy;
+      }
+      
       this._tailEnv = 0.999 * this._tailEnv + 0.001 * wetEnergy; // Slow follower (~200ms)
       
       sumEr += this._erEnv;

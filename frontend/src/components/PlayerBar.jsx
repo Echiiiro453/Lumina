@@ -772,11 +772,18 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
       reverbNodeRef.current = convolver;
       
+      // HPF de proteção para a cauda do Reverb
+      const wetHpf = audioCtx.createBiquadFilter();
+      wetHpf.type = 'highpass';
+      wetHpf.frequency.value = 150; // Corta graves embolados no reverb
+      
       mbWidthNode.connect(convolver);
+      convolver.connect(wetHpf);
+      
       if (roomTelemetryNode.numberOfInputs === 2) {
-         convolver.connect(roomTelemetryNode, 0, 1);
+         wetHpf.connect(roomTelemetryNode, 0, 1);
       } else {
-         convolver.connect(wetGainRef.current);
+         wetHpf.connect(wetGainRef.current);
          wetGainRef.current.connect(roomTelemetryNode);
       }
 
