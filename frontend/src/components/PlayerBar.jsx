@@ -355,18 +355,18 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       setReverbMix(currentPreset.wetMix);
     }
 
-    if (wetHpfRef.current && currentPreset.wetHpf) {
+    if (wetHpfRef.current && currentPreset.wetHpf && audioContextRef.current) {
       wetHpfRef.current.frequency.setTargetAtTime(currentPreset.wetHpf, audioContextRef.current.currentTime, 0.1);
     }
-    if (wetLpfRef.current && currentPreset.wetLpf) {
+    if (wetLpfRef.current && currentPreset.wetLpf && audioContextRef.current) {
       wetLpfRef.current.frequency.setTargetAtTime(currentPreset.wetLpf, audioContextRef.current.currentTime, 0.1);
     }
     
     // Filtros de Material (Mid e HF Damping)
-    if (wetMidEqRef.current) {
+    if (wetMidEqRef.current && audioContextRef.current) {
       wetMidEqRef.current.gain.setTargetAtTime(currentMat.midDampingDb, audioContextRef.current.currentTime, 0.1);
     }
-    if (wetHighEqRef.current) {
+    if (wetHighEqRef.current && audioContextRef.current) {
       wetHighEqRef.current.gain.setTargetAtTime(currentMat.hfDampingDb, audioContextRef.current.currentTime, 0.1);
     }
 
@@ -1024,15 +1024,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       ctx.clearRect(0, 0, width, height);
       
       const barWidth = (width / bufferLength) * 2.5;
+      const rootStyles = getComputedStyle(document.documentElement);
+      const primaryColor = rootStyles.getPropertyValue('--md-sys-color-primary').trim() || '#3b82f6';
+      
       let barHeight;
       let x = 0;
       
       for (let i = 0; i < bufferLength; i++) {
         barHeight = dataArray[i];
-        
-        // Cor baseada no tema M3 (Primary)
-        const rootStyles = getComputedStyle(document.documentElement);
-        const primaryColor = rootStyles.getPropertyValue('--md-sys-color-primary').trim() || '#3b82f6';
         
         ctx.fillStyle = primaryColor;
         ctx.globalAlpha = barHeight / 255;
