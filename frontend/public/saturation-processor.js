@@ -377,13 +377,13 @@ class SaturationProcessor extends AudioWorkletProcessor {
         // Acceleration / Curvature parameter
         const absD2x = Math.abs(xFeed - 2 * x1 + x2);
 
-        // Scale-Normalized Adaptive Thresholds with Infinitely Differentiable smoothLimit
-        const env = Math.abs(xFeed) + Math.abs(x1) + 1e-15;
-        const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-15;
+        // Scale-Normalized Adaptive Thresholds with relaxed tolerance to prevent division by zero instability
+        const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
+        const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-6;
         
-        const eps1 = 1e-5 * env + 1e-4 * this._smoothLimit(absD1, env) + 1e-15;
-        const eps2 = 1e-5 * envPrev + 1e-4 * this._smoothLimit(absD2, envPrev) + 1e-15;
-        const eps3 = 1e-5 * env + 1e-4 * this._smoothLimit(absD3, env) + 1e-4 * this._smoothLimit(absD2x, env) + 1e-15;
+        const eps1 = 1e-3 * env + 1e-5;
+        const eps2 = 1e-3 * envPrev + 1e-5;
+        const eps3 = 1e-3 * env + 1e-3 * absD2x + 1e-5;
 
         // 3. Pre-evaluate antiderivative levels (Unified F2)
         const F2_x  = this._F2_mode(xFeed);
@@ -427,10 +427,13 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.rmsOut[ch] = rOut;
 
         const gainComp = Math.sqrt((rIn + 1e-5) / (rOut + 1e-5));
-        const safeGain = Math.max(0.25, Math.min(2.5, gainComp));
+        const safeGain = Math.max(0.1, Math.min(1.5, gainComp)); // Apertei a rédea do Auto-Gain para evitar estourar o limite
         const satCompensated = sat * safeGain;
 
-        outCh[i] = dry * xOrigSafe + wet * satCompensated;
+        const finalSignal = dry * xOrigSafe + wet * satCompensated;
+        // Safety Soft-Clipper para proteger o DAC da placa de som
+        outCh[i] = Math.tanh(finalSignal);
+        
         x2 = x1;
         x1 = xFeed;
       }
