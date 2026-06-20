@@ -292,19 +292,58 @@ class SaturationProcessor extends AudioWorkletProcessor {
           const deltaH = H - H_prev;
           this.prevH[ch] = H;
 
-          // 1. Single-domain Macro Hysteresis model (Otimizado para salvar 80% de CPU)
-          const softSign = Math.tanh(deltaH / 0.1);
-          const rate1 = 0.50 * (1.0 + 0.5 * softSign * Math.tanh(M1 / 0.5));
-          const nextM1 = M1 + rate1 * (Math.tanh(H * 2.0) - M1);
+          // 1. Multi-domain Preisach hysteresis model with Mean-Field Interaction (5 domains)
+          const couplingStrength = 0.10;
+          const H_eff1 = H + couplingStrength * (M2 + M3 + M4 + M5);
+          const H_eff2 = H + couplingStrength * (M1 + M3 + M4 + M5);
+          const H_eff3 = H + couplingStrength * (M1 + M2 + M4 + M5);
+          const H_eff4 = H + couplingStrength * (M1 + M2 + M3 + M5);
+          const H_eff5 = H + couplingStrength * (M1 + M2 + M3 + M4);
+
+          // Domain updates (asymmetric hysteretic rates with Soft-Sign for C1 continuity)
+          // Using Math.tanh(deltaH / 0.05) instead of Math.sign(deltaH) eliminates "radio tuning" zipper noise
+          const softSign = Math.tanh(deltaH / 0.05);
+          
+          const rate1 = 0.30 * (1.0 + 0.5 * softSign * Math.tanh(M1 / 0.5));
+          const nextM1 = M1 + rate1 * (Math.tanh(H_eff1 * 2.0) - M1);
           const dM1 = nextM1 - M1;
           M1 = nextM1;
           this.magState1[ch] = M1;
 
-          // Net magnetization
-          const M = M1;
+          const rate2 = 0.20 * (1.0 + 0.4 * softSign * Math.tanh(M2 / 0.5));
+          const nextM2 = M2 + rate2 * (Math.tanh(H_eff2 * 1.3) - M2);
+          const dM2 = nextM2 - M2;
+          M2 = nextM2;
+          this.magState2[ch] = M2;
 
-          // Endogenous Barkhausen Noise
-          const rawBarkhausen = dM1 * (Math.random() - 0.5);
+          const rate3 = 0.12 * (1.0 + 0.3 * softSign * Math.tanh(M3 / 0.5));
+          const nextM3 = M3 + rate3 * (Math.tanh(H_eff3 * 0.9) - M3);
+          const dM3 = nextM3 - M3;
+          M3 = nextM3;
+          this.magState3[ch] = M3;
+
+          const rate4 = 0.07 * (1.0 + 0.25 * softSign * Math.tanh(M4 / 0.5));
+          const nextM4 = M4 + rate4 * (Math.tanh(H_eff4 * 0.5) - M4);
+          const dM4 = nextM4 - M4;
+          M4 = nextM4;
+          this.magState4[ch] = M4;
+
+          const rate5 = 0.03 * (1.0 + 0.15 * softSign * Math.tanh(M5 / 0.5));
+          const nextM5 = M5 + rate5 * (Math.tanh(H_eff5 * 0.2) - M5);
+          const dM5 = nextM5 - M5;
+          M5 = nextM5;
+          this.magState5[ch] = M5;
+
+          // Net magnetization (weighted average)
+          const M = 0.12 * M1 + 0.25 * M2 + 0.32 * M3 + 0.20 * M4 + 0.11 * M5;
+
+          // Endogenous Barkhausen Noise from micro-domain state transitions
+          const bark1 = dM1 * (Math.random() - 0.5);
+          const bark2 = dM2 * (Math.random() - 0.5);
+          const bark3 = dM3 * (Math.random() - 0.5);
+          const bark4 = dM4 * (Math.random() - 0.5);
+          const bark5 = dM5 * (Math.random() - 0.5);
+          const rawBarkhausen = 0.12 * bark1 + 0.25 * bark2 + 0.32 * bark3 + 0.20 * bark4 + 0.11 * bark5;
           const barkhausenNoise = 6e-5 * this.drive * rawBarkhausen;
 
           // 2. Physical tape noise (crossover: LF grain & 1/f Pink HF hiss)
@@ -367,25 +406,45 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
 
         const d1 = xFeed - x1;
-        const absD1 = Math.abs(d1);
-        
-        // Adaptive Thresholds
-        const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
-        const eps1 = 1e-3 * env + 1e-5;
+        const d2 = x1 - x2;
+        const d3 = xFeed - x2;
 
-        // 3. Pre-evaluate 1st-order antiderivative levels (ADAA1)
+        const absD1 = Math.abs(d1);
+        const absD2 = Math.abs(d2);
+        const absD3 = Math.abs(d3);
+        
+        // Acceleration / Curvature parameter
+        const absD2x = Math.abs(xFeed - 2 * x1 + x2);
+
+        // Scale-Normalized Adaptive Thresholds with relaxed tolerance to prevent division by zero instability
+        const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
+        const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-6;
+        
+        const eps1 = 1e-3 * env + 1e-5;
+        const eps2 = 1e-3 * envPrev + 1e-5;
+        const eps3 = 1e-3 * env + 1e-3 * absD2x + 1e-5;
+
+        // 3. Pre-evaluate antiderivative levels (Unified F2)
+        const F2_x  = this._F2_mode(xFeed);
+        const F2_x1 = this._F2_mode(x1);
+        const F2_x2 = this._F2_mode(x2);
+
         const F1_x  = this._F1_mode(xFeed);
         const F1_x1 = this._F1_mode(x1);
 
         const xMid12 = 0.5 * (xFeed + x1);
-        const fMid12 = this._f_mode(xMid12);
+        const xMid23 = 0.5 * (x1 + x2);
 
-        // 4. Compute smooth ADAA1 output path
+        const F1_mid12 = this._F1_mode(xMid12);
+        const F1_mid23 = this._F1_mode(xMid23);
+
+        // 4. Compute smooth ADAA1 output path ( gates when d1 -> 0 )
         const u1 = Math.min(1.0, absD1 / eps1);
         const w1 = u1 * u1 * (3 - 2 * u1);
+        const fMid12 = this._f_mode(xMid12);
         const sat = (u1 >= 1.0) ? (F1_x - F1_x1) / d1 : (d1 / (eps1 * eps1)) * (3 - 2 * u1) * (F1_x - F1_x1) + (1 - w1) * fMid12;
 
-        // 7. Energy Conservation Loop (Loudness-Invariant Auto-Gain to prevent tonal/gain drift)
+        // 5. Energy Conservation Loop (Loudness-Invariant Auto-Gain to prevent tonal/gain drift)
         let rIn = this.rmsIn[ch];
         let rOut = this.rmsOut[ch];
         if (isNaN(rIn) || !isFinite(rIn)) rIn = 0.0;
@@ -398,7 +457,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.rmsOut[ch] = rOut;
 
         const gainComp = Math.sqrt((rIn + 1e-5) / (rOut + 1e-5));
-        const safeGain = Math.max(0.1, Math.min(1.5, gainComp)); // Apertei a rédea do Auto-Gain para evitar estourar o limite
+        const safeGain = Math.max(0.1, Math.min(1.5, gainComp)); // Apertei a rédea do Auto-Gain
         const satCompensated = sat * safeGain;
 
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
