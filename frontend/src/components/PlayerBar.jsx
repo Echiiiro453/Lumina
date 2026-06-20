@@ -374,6 +374,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       dryGainRef.current.port.postMessage({ 
          wetMix: reverbMix, 
          preset: spatialMode,
+         material: roomMaterial,
          preDelayMs: currentPreset.preDelayMs,
          rt60: currentPreset.rt60,
          wetWidth: currentPreset.wetWidth * currentMat.wetWidth,
