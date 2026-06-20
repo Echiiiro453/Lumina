@@ -9,7 +9,7 @@
 class DepthProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
+    this.sampleRate = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     this.active = false;
     this.depth = 0.0; // 0.0 (Near/Direct) to 1.0 (Far/Deep)
@@ -65,6 +65,11 @@ class DepthProcessor extends AudioWorkletProcessor {
       const L = inL[i];
       const R = inR[i];
       
+      // Validação de segurança sugerida
+      const safeDepth = Number.isFinite(this.depth) ? Math.min(1.0, Math.max(0.0, this.depth)) : 0.0;
+      // Musical Depth cap at 0.65 for safety, allow up to 1.0 if pushed
+      const musicalDepth = safeDepth; 
+      
       // 1. Converter para Mid/Side
       const mid = (L + R) * 0.70710678;
       const side = (L - R) * 0.70710678;
@@ -82,15 +87,18 @@ class DepthProcessor extends AudioWorkletProcessor {
       const hpSide = 0.57 * (side - this.prevSide[0]) + 0.57 * this.prevHpSide[0];
       this.prevSide[0] = side;
       this.prevHpSide[0] = hpSide;
-      const sideTilt = 3.0 * this.depth;
+      const sideTilt = 3.0 * musicalDepth;
       const sideTiltGain = Math.pow(10.0, sideTilt / 20.0) - 1.0;
       const processedSide = side + sideTiltGain * hpSide;
       
       // 3. Pre-delay fracionário nas laterais (Side delay com interpolação linear)
       this.sideDelayBuf[this.sideWritePtr] = processedSide;
       
-      const targetDelay = this.depth * 600.0;
-      this.currDelay = 0.999 * this.currDelay + 0.001 * targetDelay;
+      // 2.0ms base + up to 10.0ms delay from safeDepth
+      const targetDelayMs = 2.0 + safeDepth * 10.0;
+      const targetDelaySamples = Math.round((targetDelayMs / 1000.0) * this.sampleRate);
+      
+      this.currDelay = 0.999 * this.currDelay + 0.001 * targetDelaySamples;
       
       const delayInt = Math.floor(this.currDelay);
       const delayFrac = this.currDelay - delayInt;
@@ -135,14 +143,18 @@ class DepthProcessor extends AudioWorkletProcessor {
       const N = 60 * size;
       const diffRMS = Math.sqrt(this._sumDiff / (N * 2));
       const avgTransientSmooth = this._sumTransientAtt / N;
-      const preDelayMs = (this.depth * 600.0 / this.sampleRate) * 1000.0;
-      const airAbsorptionDb = -6.0 * this.depth;
-      const hfLossDb = -3.0 * this.depth; // Uma estimativa simplificada
+      
+      const safeDepth = Number.isFinite(this.depth) ? Math.min(1.0, Math.max(0.0, this.depth)) : 0.0;
+      let preDelayMs = 2.0 + safeDepth * 10.0;
+      if (!Number.isFinite(preDelayMs)) preDelayMs = 0.0;
+      
+      const airAbsorptionDb = -6.0 * safeDepth;
+      const hfLossDb = -3.0 * safeDepth; // Uma estimativa simplificada
       
       this.port.postMessage({
         type: 'telemetry',
         name: 'Depth',
-        depth: this.depth.toFixed(2),
+        depth: safeDepth.toFixed(2),
         preDelayMs: preDelayMs.toFixed(1),
         airAbsorptionDb: airAbsorptionDb.toFixed(1),
         transientSmooth: avgTransientSmooth.toFixed(3),
