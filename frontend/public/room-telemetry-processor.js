@@ -190,13 +190,21 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       const dryRMS = Math.sqrt(this._drySq / nCh);
       const wetRMS = Math.sqrt(this._wetSq / nCh);
       
-      const erRMS = Math.sqrt(this._sumEr / nTotal);
-      const tailRMS = Math.sqrt(this._sumTail / nTotal);
+      const erRMS = Math.sqrt(this._sumEr / nCh);
+      const tailRMS = Math.sqrt(this._sumTail / nCh);
 
       const dryMonoEnergy = Math.sqrt(this._sumDryMid / nTotal) + 1e-12;
       const mixMonoEnergy = Math.sqrt(this._sumMixMid / nTotal) + 1e-12;
       
       const monoLossDb = 20 * Math.log10(mixMonoEnergy / dryMonoEnergy);
+
+      // Auto-Ducking Protection for critical Mono Loss
+      let duckedWetMix = wetMix;
+      if (monoLossDb < -1.5) {
+        this.wetMix *= 0.92;
+        this.wetWidth *= 0.95;
+        duckedWetMix = this.wetMix;
+      }
 
       this.port.postMessage({
         type: "telemetry",
@@ -204,7 +212,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
         preset: this.preset,
         preDelayMs: Number(this.preDelayMs).toString(),
         rt60: Number(this.rt60).toString() + "s",
-        wetMix: wetMix.toFixed(2),
+        wetMix: duckedWetMix.toFixed(2),
         dryRMS: dryRMS.toFixed(3),
         wetRMS: wetRMS.toFixed(3),
         earlyReflections: erRMS.toFixed(3),

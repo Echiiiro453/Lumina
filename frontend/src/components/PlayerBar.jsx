@@ -106,6 +106,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   // --- Missing / New DSP States & Refs ---
   const masterGainRef = useRef(null);
+  const wetHpfRef = useRef(null);
+  const wetLpfRef = useRef(null);
   const [enable8D, setEnable8D] = useState(false);
   const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
@@ -322,13 +324,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [playbackRate, preservesPitch, currentSong]);
 
   const ROOM_PRESETS = {
-    "Estúdio": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70 },
-    "Club": { preDelayMs: 12, rt60: 1.2, wetMix: 0.11, wetWidth: 0.80 },
-    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.12, wetWidth: 0.80 },
-    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90 },
-    "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15, wetWidth: 0.85 },
-    "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65 },
-    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.14, wetWidth: 0.95 }
+    "Estúdio": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70, wetHpf: 150, wetLpf: 10000 },
+    "Club": { preDelayMs: 12, rt60: 1.2, wetMix: 0.11, wetWidth: 0.80, wetHpf: 120, wetLpf: 8000 },
+    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.12, wetWidth: 0.80, wetHpf: 150, wetLpf: 10000 },
+    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90, wetHpf: 180, wetLpf: 12000 },
+    "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15, wetWidth: 0.85, wetHpf: 120, wetLpf: 10000 },
+    "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65, wetHpf: 200, wetLpf: 6000 },
+    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 }
   };
 
   useEffect(() => {
@@ -337,6 +339,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     // Atualiza o slider se o preset tiver mudado a sala
     if (reverbMix === 0.0 && currentPreset.wetMix > 0) {
       setReverbMix(currentPreset.wetMix);
+    }
+
+    if (wetHpfRef.current && currentPreset.wetHpf) {
+      wetHpfRef.current.frequency.setTargetAtTime(currentPreset.wetHpf, audioContextRef.current.currentTime, 0.1);
+    }
+    if (wetLpfRef.current && currentPreset.wetLpf) {
+      wetLpfRef.current.frequency.setTargetAtTime(currentPreset.wetLpf, audioContextRef.current.currentTime, 0.1);
     }
 
     if (dryGainRef.current && dryGainRef.current.port) {
@@ -778,10 +787,12 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const wetHpf = audioCtx.createBiquadFilter();
       wetHpf.type = 'highpass';
       wetHpf.frequency.value = 150; 
+      wetHpfRef.current = wetHpf;
       
       const wetLpf = audioCtx.createBiquadFilter();
       wetLpf.type = 'lowpass';
       wetLpf.frequency.value = 10000;
+      wetLpfRef.current = wetLpf;
       
       mbWidthNode.connect(convolver);
       convolver.connect(wetHpf);
