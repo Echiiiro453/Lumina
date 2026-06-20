@@ -28,6 +28,8 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     this.apfCoeffs = [0.92, 0.92, 0.88, 0.88];
     this.apfStateX = Array.from({ length: MAX_CH }, () => new Float32Array(4));
     this.apfStateY = Array.from({ length: MAX_CH }, () => new Float32Array(4));
+    this.rotatedBuffer = Array.from({ length: MAX_CH }, () => new Float32Array(128));
+    this.currentRotMix = 0.0;
     
     this.port.onmessage = (e) => {
       if (e.data.enablePhaseRotation !== undefined) {
@@ -52,10 +54,8 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     let blockPeakOut = 0;
     let blockRmsIn = 0;
     
+    // Pass 1: Process Phase Rotation and Analyze Peaks per block
     for (let i = 0; i < blockSize; ++i) {
-      let maxTP = 0;
-      
-      // 1. Rotação de Fase & Detecção de True Peak por canal
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
         
@@ -63,21 +63,47 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
         if (absIn > blockPeakIn) blockPeakIn = absIn;
         blockRmsIn += sample * sample;
         
-        // Aplica cascata de All-Pass se habilitada para dispersar densidade de pico
         if (this.enablePhaseRotation) {
           const stateX = this.apfStateX[ch];
           const stateY = this.apfStateY[ch];
+          let y_rot = sample;
           for (let stage = 0; stage < 4; ++stage) {
             const g = this.apfCoeffs[stage];
-            const y = -g * sample + stateX[stage] + g * stateY[stage];
-            stateX[stage] = sample;
+            const y = -g * y_rot + stateX[stage] + g * stateY[stage];
+            stateX[stage] = y_rot;
             stateY[stage] = y;
-            sample = y;
+            y_rot = y;
           }
+          
+          this.rotatedBuffer[ch][i] = y_rot;
+          const absRot = Math.abs(y_rot);
+          if (absRot > blockPeakOut) blockPeakOut = absRot;
         }
+      }
+    }
+    
+    // Smart Accept/Reject Decision
+    let targetRotMix = 0.0;
+    if (this.enablePhaseRotation) {
+      // Accept only if rotation improved headroom (lowered the peak)
+      if (blockPeakOut < blockPeakIn - 1e-4) {
+        targetRotMix = 1.0;
+      }
+    }
+    
+    // Pass 2: Apply Smart Crossfade, True Peak Detection and Limiting
+    const mixSmoothing = 0.05; // ~20 samples transition to prevent clicks
+    
+    for (let i = 0; i < blockSize; ++i) {
+      let maxTP = 0;
+      this.currentRotMix += mixSmoothing * (targetRotMix - this.currentRotMix);
+      
+      for (let ch = 0; ch < numChannels; ++ch) {
+        let sample = input[ch][i];
         
-        const absRot = Math.abs(sample);
-        if (absRot > blockPeakOut) blockPeakOut = absRot;
+        if (this.enablePhaseRotation) {
+           sample = sample * (1.0 - this.currentRotMix) + this.rotatedBuffer[ch][i] * this.currentRotMix;
+        }
         
         blockSamples[ch] = sample;
         
