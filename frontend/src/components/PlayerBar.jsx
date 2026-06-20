@@ -321,9 +321,31 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [playbackRate, preservesPitch, currentSong]);
 
+  const ROOM_PRESETS = {
+    "Estúdio": { preDelayMs: 8, rt60: 0.8, wetMix: 0.10 },
+    "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.16 },
+    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12 },
+    "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15 },
+    "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08 },
+    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.14 }
+  };
+
   useEffect(() => {
+    let currentPreset = ROOM_PRESETS[spatialMode] || ROOM_PRESETS["Estúdio"];
+    
+    // Atualiza o slider se o preset tiver mudado a sala
+    if (reverbMix === 0.0 && currentPreset.wetMix > 0) {
+      setReverbMix(currentPreset.wetMix);
+    }
+
     if (dryGainRef.current && dryGainRef.current.port) {
-      dryGainRef.current.port.postMessage({ wetMix: reverbMix, preset: spatialMode });
+      dryGainRef.current.port.postMessage({ 
+         wetMix: reverbMix, 
+         preset: spatialMode,
+         preDelayMs: currentPreset.preDelayMs,
+         rt60: currentPreset.rt60,
+         active: true
+      });
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
       // Fallback nativo
       dryGainRef.current.gain.setTargetAtTime(1.0 - reverbMix, audioContextRef.current.currentTime, 0.1);
