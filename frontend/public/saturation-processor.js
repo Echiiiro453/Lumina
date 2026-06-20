@@ -199,6 +199,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
       this.dcBlockY = new Float32Array(chs);
       this.postDcX = new Float32Array(chs);
       this.postDcY = new Float32Array(chs);
+      this.lowShelfY = new Float32Array(chs);
       this.fastRmsIn = new Float32Array(chs);
     }
 
@@ -291,6 +292,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
         let xFeed = x - biasStrength * nextBias * (1.0 + velocityCoupling);
 
         // Physical tape modulation noise (Frequency-shaped & State-dependent)
+        let M = 0.0;
         if (this.mode === 'tape') {
           let M1 = this.magState1[ch];
           let M2 = this.magState2[ch];
@@ -352,7 +354,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
           this.magState5[ch] = M5;
 
           // Net magnetization (weighted average)
-          const M = 0.12 * M1 + 0.25 * M2 + 0.32 * M3 + 0.20 * M4 + 0.11 * M5;
+          M = 0.12 * M1 + 0.25 * M2 + 0.32 * M3 + 0.20 * M4 + 0.11 * M5;
 
           // Endogenous Barkhausen Noise from micro-domain state transitions
           const bark1 = dM1 * (Math.random() - 0.5);
@@ -459,7 +461,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const finalSignal = dry * xOrigSafe + wet * satCompensated;
 
         // Track RMS of the clean saturated signal (ignoring noise) to prevent bias loop
-        const pureOutput = (this.mode === 'tape' && typeof M !== 'undefined') ? (satCompensated * wet + (M - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch]) * wet) : finalSignal;
+        const pureOutput = (this.mode === 'tape') ? (satCompensated * wet + (M - this.dcBlockX[ch] + 0.995 * this.dcBlockY[ch]) * wet) : finalSignal;
         this.rmsOut[ch] = this.rmsOut[ch] * rmsCoeff + (pureOutput * pureOutput) * (1 - rmsCoeff);
         // 6. Post-Saturation DC Blocker (fc ~ 20Hz)
         // Válvulas assimétricas geram DC bias pesado. Removemos para proteger o headroom e evitar clique no DAC.
