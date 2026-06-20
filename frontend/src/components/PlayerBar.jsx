@@ -720,7 +720,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       let roomTelemetryNode;
       try {
         await loadModule(`/room-telemetry-processor.js?v=${Date.now()}`);
-        roomTelemetryNode = new AudioWorkletNode(audioCtx, 'room-telemetry', { numberOfInputs: 2, numberOfOutputs: 1 });
+        roomTelemetryNode = new AudioWorkletNode(audioCtx, 'room-telemetry', { 
+           numberOfInputs: 2, 
+           numberOfOutputs: 1,
+           outputChannelCount: [2]
+        });
         roomTelemetryNode.port.postMessage({ 
            preset: spatialMode,
            wetMix: reverbMix,
