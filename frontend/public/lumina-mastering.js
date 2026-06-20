@@ -28,6 +28,8 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     this.apfCoeffs = [0.85];
     this.apfStateX = Array.from({ length: MAX_CH }, () => new Float32Array(1));
     this.apfStateY = Array.from({ length: MAX_CH }, () => new Float32Array(1));
+    this.rotatedBuffer = Array.from({ length: MAX_CH }, () => new Float32Array(128));
+    this.currentRotMix = 0.0;
     
     this.port.onmessage = (e) => {
       if (e.data.enablePhaseRotation !== undefined) {
@@ -49,12 +51,11 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     const blockSamples = new Float32Array(numChannels);
     
     let blockPeakIn = 0;
-    let blockPeakOut = 0;
+    let blockPeakRot = 0;
     let blockRmsIn = 0;
     
+    // Pass 1: Evaluate Rotation Candidates
     for (let i = 0; i < blockSize; ++i) {
-      let maxTP = 0;
-      
       for (let ch = 0; ch < numChannels; ++ch) {
         let sample = input[ch][i];
         
@@ -65,17 +66,61 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
         if (this.enablePhaseRotation) {
           const stateX = this.apfStateX[ch];
           const stateY = this.apfStateY[ch];
+          let y_rot = sample;
           for (let stage = 0; stage < this.apfCoeffs.length; ++stage) {
             const g = this.apfCoeffs[stage];
-            const y = -g * sample + stateX[stage] + g * stateY[stage];
-            stateX[stage] = sample;
+            const y = -g * y_rot + stateX[stage] + g * stateY[stage];
+            stateX[stage] = y_rot;
             stateY[stage] = y;
-            sample = y;
+            y_rot = y;
           }
+          this.rotatedBuffer[ch][i] = y_rot;
+          const absRot = Math.abs(y_rot);
+          if (absRot > blockPeakRot) blockPeakRot = absRot;
         }
+      }
+    }
+    
+    // Smart Gate Logic
+    let accepted = false;
+    let peakReductionDb = 0;
+    let crestBefore = 0;
+    let crestAfterCandidate = 0;
+    let rejectReason = "disabled";
+    
+    if (this.enablePhaseRotation && blockSize > 0) {
+      const rms = Math.sqrt(blockRmsIn / (blockSize * numChannels)) + 1e-12;
+      crestBefore = blockPeakIn / rms;
+      crestAfterCandidate = blockPeakRot / rms;
+      peakReductionDb = 20 * Math.log10((blockPeakRot + 1e-12) / (blockPeakIn + 1e-12));
+      
+      const peakOk = peakReductionDb <= -0.35;
+      const crestOk = crestAfterCandidate < (crestBefore - 0.05);
+      
+      if (peakOk && crestOk) {
+        accepted = true;
+        rejectReason = "none";
+      } else if (!peakOk) {
+        rejectReason = "rejected_peak_worse";
+      } else {
+        rejectReason = "rejected_crest_worse";
+      }
+    }
+    
+    // Pass 2: Output Selection & Limiting
+    const targetMix = accepted ? 1.0 : 0.0;
+    const mixSmoothing = 0.1; // 10 samples micro-crossfade to prevent clicks
+    
+    for (let i = 0; i < blockSize; ++i) {
+      let maxTP = 0;
+      this.currentRotMix += mixSmoothing * (targetMix - this.currentRotMix);
+      
+      for (let ch = 0; ch < numChannels; ++ch) {
+        let sample = input[ch][i];
         
-        const absRot = Math.abs(sample);
-        if (absRot > blockPeakOut) blockPeakOut = absRot;
+        if (this.enablePhaseRotation) {
+           sample = sample * (1.0 - this.currentRotMix) + this.rotatedBuffer[ch][i] * this.currentRotMix;
+        }
         
         blockSamples[ch] = sample;
         
@@ -159,31 +204,39 @@ class LuminaMasteringProcessor extends AudioWorkletProcessor {
     
     if (this.enablePhaseRotation) {
       this._dbgPeakIn = Math.max(this._dbgPeakIn || 0, blockPeakIn);
-      this._dbgPeakOut = Math.max(this._dbgPeakOut || 0, blockPeakOut);
+      this._dbgPeakRot = Math.max(this._dbgPeakRot || 0, blockPeakRot);
       this._dbgRms = (this._dbgRms || 0) + blockRmsIn;
+      this._dbgAcceptedCount = (this._dbgAcceptedCount || 0) + (accepted ? 1 : 0);
       this._telemetryCount = (this._telemetryCount || 0) + 1;
+      
+      // Armazena a última razão de rejeição
+      if (!accepted) this._lastRejectReason = rejectReason;
       
       if (this._telemetryCount >= 60) {
         const samples = 60 * blockSize * numChannels;
         const rms = Math.sqrt(this._dbgRms / samples) + 1e-12;
         
-        const crestBefore = this._dbgPeakIn / rms;
-        const crestAfter = this._dbgPeakOut / rms;
+        const cBefore = this._dbgPeakIn / rms;
+        const cAfterCand = this._dbgPeakRot / rms;
+        const pRedCandDb = 20 * Math.log10((this._dbgPeakRot + 1e-12) / (this._dbgPeakIn + 1e-12));
         
-        const peakReductionDb = 20 * Math.log10((this._dbgPeakOut + 1e-12) / (this._dbgPeakIn + 1e-12));
+        const wasAccepted = this._dbgAcceptedCount > 30; // Se foi aceito na maioria dos blocos
+        const finalReason = wasAccepted ? "none" : (this._lastRejectReason || "rejected");
         
         this.port.postMessage({
           type: 'telemetry',
           name: 'PhaseRot',
-          crestBefore: crestBefore.toFixed(1),
-          crestAfter: crestAfter.toFixed(1),
-          peakReduction: peakReductionDb.toFixed(1) + 'dB',
-          triggered: true
+          crestBefore: cBefore.toFixed(1),
+          crestAfterCandidate: cAfterCand.toFixed(1),
+          peakReductionCandidate: pRedCandDb.toFixed(1) + 'dB',
+          accepted: wasAccepted,
+          reason: finalReason
         });
         
         this._dbgPeakIn = 0;
-        this._dbgPeakOut = 0;
+        this._dbgPeakRot = 0;
         this._dbgRms = 0;
+        this._dbgAcceptedCount = 0;
         this._telemetryCount = 0;
       }
     }
