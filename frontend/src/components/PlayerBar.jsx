@@ -143,7 +143,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
   const crossfadeTimeoutRef = useRef(null);
-  
+  const masterTelemetryRef = useRef(null);  
   const workletAnchorRef = useRef({ pre: null, post: null });
   const loadedModulesRef = useRef({}); // To track which modules are loaded
 
@@ -1040,7 +1040,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
             }
             const preGainDb = 20 * Math.log10(preGainRef.current ? preGainRef.current.gain.value : 1.0);
             
-            logToCMD("DSP-MasterOut", JSON.stringify({
+            const tele = {
               type: "telemetry",
               name: "MasterOut",
               headroomDb: preGainDb.toFixed(1),
@@ -1049,7 +1049,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
               clipCount: data.clipCount,
               limiterReductionDb: (typeof reductionDb === 'number' ? Math.abs(reductionDb) : 0).toFixed(1),
               volume: audioRef.current ? audioRef.current.volume.toFixed(2) : "1.00"
-            }), data.clipCount > 0 ? "error" : "success");
+            };
+            
+            masterTelemetryRef.current = tele;
+            
+            logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success");
           }
         };
         limiterNode.connect(truePeakNode);
@@ -1880,6 +1884,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           wetMidEqRef={wetMidEqRef}
           wetHighEqRef={wetHighEqRef}
           wetLpfRef={wetLpfRef}
+          masterTelemetryRef={masterTelemetryRef}
         />
       )}
     </>

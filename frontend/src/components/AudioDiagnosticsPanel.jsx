@@ -23,7 +23,7 @@ export function AudioDiagnosticsPanel({
   audioContextRef, analyserRef, masterGainRef,
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
-  eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef,
+  eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef, masterTelemetryRef,
 }) {
   const canvasRef = useRef(null);
   const curveCanvasRef = useRef(null);
@@ -32,6 +32,7 @@ export function AudioDiagnosticsPanel({
   const [nodes, setNodes] = useState([]);
   const [lufs, setLufs] = useState(null);
   const [reduction, setReduction] = useState(null);
+  const [masterTelemetry, setMasterTelemetry] = useState(null);
 
   // ---- Inspect all nodes ------------------------------------------------
   useEffect(() => {
@@ -149,6 +150,17 @@ export function AudioDiagnosticsPanel({
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [isOpen, analyserRef, limiterRef]);
+
+  // ---- Telemetry Polling ------------------------------------------------
+  useEffect(() => {
+    if (!isOpen) return;
+    const interval = setInterval(() => {
+      if (masterTelemetryRef?.current) {
+        setMasterTelemetry({ ...masterTelemetryRef.current });
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [isOpen, masterTelemetryRef]);
 
   // Canvas unificado (Espectro + Curva)
 
@@ -376,6 +388,53 @@ export function AudioDiagnosticsPanel({
                   {reduction !== null ? `${reduction} dB` : '--'}
                 </p>
               </div>
+
+            {/* MASTER OUT Box */}
+            {masterTelemetry && (
+              <div className={`p-4 rounded-2xl border ${masterTelemetry.clipCount > 0 ? 'bg-error/10 border-error/30' : masterTelemetry.clipCount === 0 && masterTelemetry.peakDb > -0.5 ? 'bg-yellow-400/10 border-yellow-400/30' : 'bg-green-400/5 border-green-400/30'}`}>
+                <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-3 flex items-center gap-1">
+                   <Activity size={12} /> Master Out (Airbag / True Peak)
+                </p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Peak</p>
+                    <p className={`text-xl font-mono font-bold ${masterTelemetry.peakDb > -1.0 ? 'text-yellow-400' : 'text-primary'}`}>
+                      {masterTelemetry.peakDb !== undefined ? masterTelemetry.peakDb : '--'} dB
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Clips</p>
+                    <p className={`text-xl font-mono font-bold ${masterTelemetry.clipCount > 0 ? 'text-error' : 'text-primary'}`}>
+                      {masterTelemetry.clipCount !== undefined ? masterTelemetry.clipCount : '--'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Safety</p>
+                    <p className={`text-xl font-mono font-bold ${masterTelemetry.clipCount > 0 ? 'text-error' : masterTelemetry.peakDb > -0.5 ? 'text-yellow-400' : 'text-green-400'}`}>
+                      {masterTelemetry.clipCount > 0 ? 'RED' : masterTelemetry.peakDb > -0.5 ? 'YELLOW' : 'GREEN'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Headroom</p>
+                    <p className="text-sm font-mono font-bold text-on-surface">
+                      {masterTelemetry.headroomDb !== undefined ? masterTelemetry.headroomDb : '--'} dB
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">PreGain</p>
+                    <p className="text-sm font-mono font-bold text-on-surface">
+                      {masterTelemetry.preGain !== undefined ? masterTelemetry.preGain : '--'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Limiter GR</p>
+                    <p className="text-sm font-mono font-bold text-on-surface">
+                      {masterTelemetry.limiterReductionDb !== undefined ? `-${masterTelemetry.limiterReductionDb}` : '--'} dB
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             </div>
 
             {/* Node Status List */}
