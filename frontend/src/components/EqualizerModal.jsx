@@ -32,6 +32,70 @@ const MATERIAIS = ['Madeira', 'Concreto', 'Vidro', 'Tecido', 'Pedra', 'Metal', '
 const GENEROS = ['Rock', 'Jazz', 'Ambient', 'Orchestral', 'EDM'];
 const MOTION_MODES = ['Parado', 'Elipse', 'Figura 8', 'Espiral', 'Vertical', 'Caos', 'Reativo'];
 
+function sanitizeHeadphoneProfile(profile) {
+  const allowed = ["peaking", "lowshelf", "highshelf", "lowpass", "highpass"];
+  const filters = (profile.filters || [])
+    .filter(f => Number.isFinite(f.freq))
+    .map(f => ({
+      type: allowed.includes(f.type) ? f.type : "peaking",
+      freq: Math.max(20, Math.min(20000, f.freq)),
+      gainDb: Math.max(-12, Math.min(6, f.gainDb ?? 0)),
+      Q: Math.max(0.1, Math.min(8, f.Q ?? 1))
+    }))
+    .slice(0, 12);
+  const maxBoostDb = Math.max(0, ...filters.map(f => f.gainDb));
+  const safePreampDb = Math.min(profile.preampDb ?? 0, -(maxBoostDb + 0.7));
+  return {
+    ...profile,
+    filters,
+    maxBoostDb,
+    preampDb: safePreampDb,
+    safety: safePreampDb <= -(maxBoostDb + 0.7) ? "OK" : "ADJUSTED"
+  };
+}
+
+function parseAutoEqTxt(text, meta = {}) {
+  const lines = text.split(/\r?\n/);
+  let preampDb = 0;
+  const filters = [];
+  for (const line of lines) {
+    const preampMatch = line.match(/Preamp:\s*([-+]?\d+(\.\d+)?)\s*dB/i);
+    if (preampMatch) {
+      preampDb = parseFloat(preampMatch[1]);
+      continue;
+    }
+    const filterMatch = line.match(
+      /Filter\s+\d+:\s+ON\s+(\w+)\s+Fc\s+([-+]?\d+(\.\d+)?)\s+Hz\s+Gain\s+([-+]?\d+(\.\d+)?)\s+dB\s+Q\s+([-+]?\d+(\.\d+)?)/i
+    );
+    if (filterMatch) {
+      const autoEqType = filterMatch[1].toUpperCase();
+      const typeMap = {
+        PK: "peaking",
+        LS: "lowshelf",
+        HS: "highshelf",
+        LP: "lowpass",
+        HP: "highpass"
+      };
+      filters.push({
+        type: typeMap[autoEqType] ?? "peaking",
+        freq: Number(filterMatch[2]),
+        gainDb: Number(filterMatch[4]),
+        Q: Number(filterMatch[6])
+      });
+    }
+  }
+  return sanitizeHeadphoneProfile({
+    id: meta.id ?? "custom-profile",
+    name: meta.name ?? "Custom AutoEQ Profile",
+    brand: meta.brand ?? "Unknown",
+    type: meta.type ?? "Unknown",
+    source: "AutoEQ TXT",
+    target: meta.target ?? "Unknown",
+    preampDb,
+    filters
+  });
+}
+
 export function EqualizerModal({ 
   isOpen, onClose, gains, setGains, preset, setPreset, 
   playbackRate, setPlaybackRate, preservesPitch, setPreservesPitch, reverbMix, setReverbMix,
@@ -58,7 +122,10 @@ export function EqualizerModal({
   spectralGlueThreshold, setSpectralGlueThreshold,
   enableStereoDepth, setEnableStereoDepth,
   stereoDepthAmount, setStereoDepthAmount,
-  enableReplayGain, setEnableReplayGain
+  enableReplayGain, setEnableReplayGain,
+  
+  autoEqProfile, setAutoEqProfile,
+  autoEqAmount, setAutoEqAmount
 }) {
   const [activeTab, setActiveTab] = useState('eq');
 
@@ -69,6 +136,19 @@ export function EqualizerModal({
     newGains[index] = parseFloat(value);
     if(setGains) setGains(newGains);
     if(setPreset) setPreset('Custom');
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      if (setAutoEqProfile) {
+        setAutoEqProfile(parseAutoEqTxt(text, { name: file.name.replace('.txt', ''), id: file.name }));
+      }
+    };
+    reader.readAsText(file);
   };
 
   const applyPreset = (presetName) => {
@@ -231,6 +311,65 @@ export function EqualizerModal({
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* AutoEQ / Correção de Fone */}
+                <div className="border border-[var(--md-sys-color-primary)]/30 bg-[var(--md-sys-color-primary-container)]/10 rounded-[24px] p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-sm font-bold text-[var(--md-sys-color-on-surface)] flex items-center space-x-2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--md-sys-color-primary)]"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+                        <span>Calibração de Fone (AutoEQ)</span>
+                      </h3>
+                      <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mt-1">Nivela a resposta de frequência do seu hardware.</p>
+                    </div>
+                    {autoEqProfile && (
+                      <button onClick={() => setAutoEqProfile(null)} className="text-xs text-[var(--md-sys-color-error)] font-bold px-3 py-1 bg-[var(--md-sys-color-error)]/10 rounded-full hover:bg-[var(--md-sys-color-error)]/20 transition-colors">Remover Perfil</button>
+                    )}
+                  </div>
+
+                  {!autoEqProfile ? (
+                    <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
+                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)] mb-4 text-center">Importe um preset do AutoEQ (.txt)<br/>para corrigir seu fone de ouvido.</p>
+                      <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] rounded-full text-xs font-bold hover:shadow-lg transition-all">
+                        Carregar Preset
+                        <input type="file" accept=".txt" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div className="p-4 bg-[var(--md-sys-color-surface-container-low)] rounded-xl border border-[var(--md-sys-color-outline-variant)]/20">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-xs text-[var(--md-sys-color-on-surface-variant)] uppercase font-bold tracking-wider">Modelo Ativo</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${autoEqProfile.safety === 'OK' ? 'bg-[#4ade80]/20 text-[#4ade80]' : 'bg-[#facc15]/20 text-[#facc15]'}`}>{autoEqProfile.safety}</span>
+                        </div>
+                        <div className="text-sm font-bold text-[var(--md-sys-color-on-surface)]">{autoEqProfile.name}</div>
+                        <div className="flex space-x-4 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                          <div>Filtros: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.filters.length}</span></div>
+                          <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb.toFixed(1)}dB</span></div>
+                          <div>Boost Max: <span className="text-[var(--md-sys-color-primary)] font-bold">+{autoEqProfile.maxBoostDb.toFixed(1)}dB</span></div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-4">
+                          <label className="text-xs font-bold text-[var(--md-sys-color-on-surface)]">Intensidade da Correção</label>
+                          <span className="text-xs font-mono text-[var(--md-sys-color-primary)] font-bold">{Math.round((autoEqAmount || 0) * 100)}%</span>
+                        </div>
+                        <div className="flex space-x-2">
+                          {[ {label: 'Leve', val: 0.5}, {label: 'Natural', val: 0.75}, {label: 'Completa', val: 1.0} ].map(amt => (
+                            <button
+                              key={amt.label}
+                              onClick={() => setAutoEqAmount && setAutoEqAmount(amt.val)}
+                              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${autoEqAmount === amt.val ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)]/10'}`}
+                            >
+                              {amt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Legacy EQ Band Sliders */}

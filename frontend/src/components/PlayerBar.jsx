@@ -151,6 +151,70 @@ function calculateReplayGain({
   };
 }
 
+function sanitizeHeadphoneProfile(profile) {
+  const allowed = ["peaking", "lowshelf", "highshelf", "lowpass", "highpass"];
+  const filters = (profile.filters || [])
+    .filter(f => Number.isFinite(f.freq))
+    .map(f => ({
+      type: allowed.includes(f.type) ? f.type : "peaking",
+      freq: Math.max(20, Math.min(20000, f.freq)),
+      gainDb: Math.max(-12, Math.min(6, f.gainDb ?? 0)),
+      Q: Math.max(0.1, Math.min(8, f.Q ?? 1))
+    }))
+    .slice(0, 12);
+  const maxBoostDb = Math.max(0, ...filters.map(f => f.gainDb));
+  const safePreampDb = Math.min(profile.preampDb ?? 0, -(maxBoostDb + 0.7));
+  return {
+    ...profile,
+    filters,
+    maxBoostDb,
+    preampDb: safePreampDb,
+    safety: safePreampDb <= -(maxBoostDb + 0.7) ? "OK" : "ADJUSTED"
+  };
+}
+
+export function parseAutoEqTxt(text, meta = {}) {
+  const lines = text.split(/\r?\n/);
+  let preampDb = 0;
+  const filters = [];
+  for (const line of lines) {
+    const preampMatch = line.match(/Preamp:\s*([-+]?\d+(\.\d+)?)\s*dB/i);
+    if (preampMatch) {
+      preampDb = parseFloat(preampMatch[1]);
+      continue;
+    }
+    const filterMatch = line.match(
+      /Filter\s+\d+:\s+ON\s+(\w+)\s+Fc\s+([-+]?\d+(\.\d+)?)\s+Hz\s+Gain\s+([-+]?\d+(\.\d+)?)\s+dB\s+Q\s+([-+]?\d+(\.\d+)?)/i
+    );
+    if (filterMatch) {
+      const autoEqType = filterMatch[1].toUpperCase();
+      const typeMap = {
+        PK: "peaking",
+        LS: "lowshelf",
+        HS: "highshelf",
+        LP: "lowpass",
+        HP: "highpass"
+      };
+      filters.push({
+        type: typeMap[autoEqType] ?? "peaking",
+        freq: Number(filterMatch[2]),
+        gainDb: Number(filterMatch[4]),
+        Q: Number(filterMatch[6])
+      });
+    }
+  }
+  return sanitizeHeadphoneProfile({
+    id: meta.id ?? "custom-profile",
+    name: meta.name ?? "Custom AutoEQ Profile",
+    brand: meta.brand ?? "Unknown",
+    type: meta.type ?? "Unknown",
+    source: "AutoEQ TXT",
+    target: meta.target ?? "Unknown",
+    preampDb,
+    filters
+  });
+}
+
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -218,6 +282,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const wetMidEqRef = useRef(null);
   const wetHighEqRef = useRef(null);
   const currentIrRmsRef = useRef(0.15); // baseline safe rms
+
+  // --- AutoEQ ---
+  const [autoEqProfile, setAutoEqProfile] = useState(null);
+  const [autoEqAmount, setAutoEqAmount] = useState(0.75);
+  const autoEqPreampRef = useRef(null);
+  const autoEqFiltersRef = useRef([]);
+
   const [enable8D, setEnable8D] = useState(false);
   const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
@@ -547,6 +618,49 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     Metal: { hfDampingDb: 0.0, midDampingDb: 0.5, wetWidth: 0.85, wetMixMult: 1.15, hpfOffset: -10, lpfOffset: 1000 },
     Carpete: { hfDampingDb: -6.0, midDampingDb: -2.0, wetWidth: 0.60, wetMixMult: 0.60, hpfOffset: 80, lpfOffset: -5000 }
   };
+
+  useEffect(() => {
+    if (!autoEqPreampRef.current || !autoEqFiltersRef.current || !audioContextRef.current) return;
+    
+    const ctx = audioContextRef.current;
+    if (!autoEqProfile) {
+      // Bypass
+      autoEqPreampRef.current.gain.setTargetAtTime(1.0, ctx.currentTime, 0.1);
+      autoEqFiltersRef.current.forEach(f => {
+        f.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+      });
+      return;
+    }
+
+    const effectivePreampDb = autoEqProfile.preampDb * autoEqAmount;
+    autoEqPreampRef.current.gain.setTargetAtTime(Math.pow(10, effectivePreampDb / 20), ctx.currentTime, 0.1);
+
+    autoEqFiltersRef.current.forEach((f, index) => {
+      if (index < autoEqProfile.filters.length) {
+        const pf = autoEqProfile.filters[index];
+        f.type = pf.type;
+        f.frequency.setTargetAtTime(pf.freq, ctx.currentTime, 0.1);
+        f.Q.setTargetAtTime(pf.Q, ctx.currentTime, 0.1);
+        f.gain.setTargetAtTime(pf.gainDb * autoEqAmount, ctx.currentTime, 0.1);
+      } else {
+        f.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+      }
+    });
+
+    logToCMD("DSP-AutoEQ", JSON.stringify({
+      type: "telemetry",
+      name: "HeadphoneCorrection",
+      model: autoEqProfile.name,
+      active: true,
+      amount: autoEqAmount.toFixed(2),
+      filterCount: autoEqProfile.filters.length,
+      maxBoostDb: autoEqProfile.maxBoostDb.toFixed(1),
+      preampDb: autoEqProfile.preampDb.toFixed(1),
+      effectivePreampDb: effectivePreampDb.toFixed(1),
+      safety: autoEqProfile.safety
+    }), "info");
+
+  }, [autoEqProfile, autoEqAmount]);
 
   useEffect(() => {
     let currentPreset = ROOM_PRESETS[spatialMode] || ROOM_PRESETS["Estúdio"];
@@ -935,6 +1049,26 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       ditherSrc.start();
       ditherSrc.connect(source);
       
+      // --- AutoEQ Chain ---
+      const autoEqPreamp = audioCtx.createGain();
+      autoEqPreampRef.current = autoEqPreamp;
+      const autoEqFilters = [];
+      for(let i=0; i<12; i++) {
+         const f = audioCtx.createBiquadFilter();
+         f.type = 'peaking';
+         f.frequency.value = 1000;
+         f.Q.value = 1.0;
+         f.gain.value = 0; // Flat por padrão
+         autoEqFilters.push(f);
+      }
+      autoEqFiltersRef.current = autoEqFilters;
+      
+      replayGainNode.connect(autoEqPreamp);
+      autoEqPreamp.connect(autoEqFilters[0]);
+      for(let i=0; i<11; i++) {
+         autoEqFilters[i].connect(autoEqFilters[i+1]);
+      }
+
       // Criar 10 bandas do equalizador
       const filters = [];
       for (let i = 0; i < EQ_BANDS.length; i++) {
@@ -956,7 +1090,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const postNode = audioCtx.createGain();
       workletAnchorRef.current = { pre: preNode, post: postNode };
 
-      replayGainNode.connect(filters[0]);
+      autoEqFilters[11].connect(filters[0]);
       for (let i = 0; i < filters.length - 1; i++) {
         filters[i].connect(filters[i+1]);
       }
