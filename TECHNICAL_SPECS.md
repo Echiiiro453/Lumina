@@ -39,5 +39,14 @@ O aplicativo é montado para ser "Zero-Setup" (Portátil) para o usuário final.
 ## 6. Sincronização de Letras (Lyrics)
 Um robusto sistema interno que constrói queries otimizadas removendo sujeiras ("Official Video", "Remastered") e rastreia na web as letras sincronizadas (`.lrc`), embutindo essas letras diretamente no contêiner final do arquivo (FLAC/MP3) e também rodando dinamicamente no miniplayer em tempo real.
 
+## 7. Lumina Audio Engine (DSP & Mastering)
+O motor de áudio nativo rodando dentro do frontend foi desenvolvido para entregar qualidade de nível audiófilo e precisão de engenharia sonora via `AudioWorklet`:
+* **ReplayGain (Volume Leveling):** Um sistema avançado de pré-ganho inteligente que lê os metadados dinâmicos e calibra a altura do som via `setTargetAtTime`, garantindo transições suaves (click-free) e nível de energia consistente entre as faixas, não importa a origem.
+* **AutoEQ (Headphone Correction):** Calibração de hardware através de cascatas de dezenas de `BiquadFilterNode` que processam arquivos de equalização baseados nos alvos Harman. Protege o headroom com o algoritmo `sanitizeHeadphoneProfile` aplicando Pre-Amp Reduction automático para evitar clipping.
+* **Cadeia DSP Avançada:** Módulos de processamento de ponta como *Spatial 8D Panner*, *Room Convolver* (com proteção de Wet Hard-Cap Limit para espaços extremos), e processadores cirúrgicos como *Spectral Glue*, *Phase Rotation*, e Exciter operando com telemetria rigorosa.
+* **A/B Comparator & Telemetria:** Um módulo profissional com Equal-Power Crossfade (cos/sin blending) e Null/Diff RMS (Teste Nulo). Permite alternar transparentemente entre áudio original, referência calibrada e sinal processado para tomar decisões puramente musicais sem mentiras de volume.
+* **Vectorscope & Phase Meter:** Monitoramento dinâmico estéreo baseando-se nas amplitudes `Mid/Side` com rastreio da correlação (`sumLR / Math.sqrt(...)`). Renderizado em Canvas através de buffers de alta frequência (~10fps), alerta automaticamente contra cancelamentos de fase (*Mono Incompatible*).
+* **Master Safety:** Pipeline final equipada com um Peak/True-Peak Limiter inviolável e medidor LUFS/RMS de classe internacional, certificando de que independentemente da maluquice dos ajustes do usuário, o som sairá polido e protegido de distorções e engasgos.
+
 ---
-**Status Atual do Projeto:** Preparado para escala de produção, com todas as defesas do YouTube quebradas via bypasses sistêmicos e uma arquitetura visual no estado-da-arte.
+**Status Atual do Projeto (v4.2.0):** Preparado para escala de produção, sendo simultaneamente um extrator poderoso com todas as defesas do YouTube quebradas via bypasses sistêmicos e uma Estação de Trabalho de Áudio Analítica de altíssima precisão com UI Material You de ponta.
