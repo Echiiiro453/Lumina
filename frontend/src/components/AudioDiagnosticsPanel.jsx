@@ -677,7 +677,8 @@ export function AudioDiagnosticsPanel({
                       {/* Detailed Metrics */}
                       {res.metrics && (
                         <div className="grid grid-cols-3 gap-1 mb-2 text-[10px] font-mono">
-                          <div><span className="opacity-60">Peak:</span> {res.metrics.peakDb?.toFixed(1)}dB</div>
+                          <div><span className="opacity-60">Peak(Pre):</span> {res.metrics.preMasterPeakDb?.toFixed(1)}dB</div>
+                          <div><span className="opacity-60">Peak(Post):</span> {res.metrics.peakDb?.toFixed(1)}dB</div>
                           <div><span className="opacity-60">Clips:</span> {res.metrics.clipCount}</div>
                           <div><span className="opacity-60">Corr:</span> {res.metrics.correlation > 0 ? '+' : ''}{res.metrics.correlation?.toFixed(2)}</div>
                           <div><span className="opacity-60">Width:</span> {res.metrics.widthPercent?.toFixed(0)}%</div>

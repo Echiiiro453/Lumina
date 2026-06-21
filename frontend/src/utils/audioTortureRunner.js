@@ -116,12 +116,21 @@ function analyzeRenderedBuffer(test, buffer, telemetry) {
   const masterLogs = telemetry.filter(t => t.name === "MasterOut");
   const scopeLogs = telemetry.filter(t => t.name === "StereoScope");
   const clipCount = masterLogs.reduce((a, t) => a + Number(t.clipCount || t.clips || 0), 0);
+  
+  let preMasterPeakDb = -100;
+  masterLogs.forEach(t => {
+    if (t.peakPreMasterDb !== undefined) {
+      const pm = parseFloat(t.peakPreMasterDb);
+      if (pm > preMasterPeakDb) preMasterPeakDb = pm;
+    }
+  });
+  
   let maxLimiterGR = 0;
   masterLogs.forEach(t => { if (t.limiterReductionDb && t.limiterReductionDb > maxLimiterGR) maxLimiterGR = t.limiterReductionDb; });
 
   const lastScope = scopeLogs.at(-1);
   const metrics = {
-    peakDb, rmsDb, clipCount, nanDetected, maxLimiterGR,
+    peakDb, preMasterPeakDb, rmsDb, clipCount, nanDetected, maxLimiterGR,
     correlation: lastScope ? Number(lastScope.corr) : (test.signal === "dangerousPhase" ? -0.5 : 0.9),
     widthPercent: lastScope ? Number(lastScope.widthPercent) : 50,
     phaseRisk: lastScope?.phaseRisk ?? "LOW"
@@ -133,7 +142,7 @@ function validateTestResult(test, metrics) {
   const failures = []; const warnings = [];
   if (metrics.nanDetected) failures.push("NaN/Infinity detectado.");
   if (metrics.clipCount > (test.rules.maxClipCount ?? 0)) failures.push(`Clip count: ${metrics.clipCount}`);
-  if (metrics.peakDb > (test.rules.maxPeakDb ?? -0.3)) failures.push(`Peak: ${metrics.peakDb.toFixed(1)} dB`);
+  if (metrics.peakDb > (test.rules.maxPeakDb ?? -0.3)) failures.push(`Peak Post-Master: ${metrics.peakDb.toFixed(1)} dB`);
   if (test.rules.minCorrelation !== undefined && metrics.correlation < test.rules.minCorrelation) failures.push(`Corr: ${metrics.correlation.toFixed(2)}`);
   if (test.rules.maxLimiterGR !== undefined && metrics.maxLimiterGR > test.rules.maxLimiterGR) failures.push(`Limiter GR: ${metrics.maxLimiterGR.toFixed(1)} dB`);
 

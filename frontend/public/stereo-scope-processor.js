@@ -4,6 +4,7 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
 
     this.frame = 0;
     this.EPS = 1e-12;
+    this.sideGain = 1.0;
   }
 
   process(inputs, outputs) {
@@ -15,11 +16,6 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
     const L = input[0];
     const R = input[1];
 
-    if (output && output.length >= 2) {
-      output[0].set(L);
-      output[1].set(R);
-    }
-
     let sumL2 = 0;
     let sumR2 = 0;
     let sumLR = 0;
@@ -28,33 +24,61 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
 
     const points = [];
 
+    // Calculate metrics first to update governor
     for (let i = 0; i < L.length; i++) {
+      const l = L[i] || 0;
+      const r = R[i] || 0;
+      sumL2 += l * l;
+      sumR2 += r * r;
+      sumLR += l * r;
+    }
+
+    const blockCorr = sumLR / Math.sqrt((sumL2 * sumR2) + this.EPS);
+    const blockMidRMS = Math.sqrt(sumL2 + sumR2 + 2*sumLR); // Simplified
+    const blockSideRMS = Math.sqrt(sumL2 + sumR2 - 2*sumLR);
+    const blockWidth = blockSideRMS / (blockMidRMS + this.EPS);
+
+    // Stereo Governor Logic
+    let targetSideGain = 1.0;
+    if (blockCorr < -0.05 || blockWidth > 1.2) {
+      targetSideGain = 0.4; // Crush dangerous anti-phase
+    } else if (blockCorr < 0.0) {
+      targetSideGain = 0.7; // Tame mild anti-phase
+    }
+
+    for (let i = 0; i < L.length; i++) {
+      this.sideGain = this.sideGain * 0.99 + targetSideGain * 0.01; // Smooth transition
+      
       const l = L[i] || 0;
       const r = R[i] || 0;
 
       const mid = (l + r) * Math.SQRT1_2;
-      const side = (l - r) * Math.SQRT1_2;
+      let side = (l - r) * Math.SQRT1_2;
+      
+      // Apply Governor
+      side *= this.sideGain;
 
-      sumL2 += l * l;
-      sumR2 += r * r;
-      sumLR += l * r;
+      // Reconstruct
+      if (output && output.length >= 2) {
+        output[0][i] = (mid + side) * Math.SQRT1_2;
+        output[1][i] = (mid - side) * Math.SQRT1_2;
+      }
+
       sumMid2 += mid * mid;
       sumSide2 += side * side;
 
-      // Extract a few points per frame to not overload main thread
-      if (i % 8 === 0) {
-        points.push([side, mid]);
-      }
+      if (i % 8 === 0) points.push([side, mid]);
     }
 
     this.frame++;
 
-    if (this.frame % 10 === 0) { // roughly every 1.3ms at 128 buffer / 44100
+    if (this.frame % 10 === 0) {
       const n = L.length;
       const midRMS = Math.sqrt(sumMid2 / n);
       const sideRMS = Math.sqrt(sumSide2 / n);
 
-      const corr = sumLR / Math.sqrt((sumL2 * sumR2) + this.EPS);
+      // Use smoothed block correlation for UI
+      const corr = blockCorr;
       const width = sideRMS / (midRMS + this.EPS);
       const widthDb = 20 * Math.log10(width + this.EPS);
 

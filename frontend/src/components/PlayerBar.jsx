@@ -151,6 +151,44 @@ function calculateReplayGain({
   };
 }
 
+function computeAutoEqCurveMaxBoostDb(filters) {
+  try {
+    const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
+    const fftSize = 512;
+    const freqs = new Float32Array(fftSize);
+    for (let i = 0; i < fftSize; i++) {
+      const t = i / (fftSize - 1);
+      freqs[i] = 20 * Math.pow(1000, t);
+    }
+
+    const totalMag = new Float32Array(fftSize).fill(1);
+    for (const f of filters) {
+      const bq = ctx.createBiquadFilter();
+      bq.type = f.type;
+      bq.frequency.value = f.freq;
+      if (f.gainDb !== undefined) bq.gain.value = f.gainDb;
+      if (f.Q !== undefined) bq.Q.value = f.Q;
+      
+      const mag = new Float32Array(fftSize);
+      const phase = new Float32Array(fftSize);
+      bq.getFrequencyResponse(freqs, mag, phase);
+      
+      for (let i = 0; i < fftSize; i++) {
+        totalMag[i] *= Math.max(mag[i], 1e-9);
+      }
+    }
+
+    let maxBoostDb = -999;
+    for (let i = 0; i < fftSize; i++) {
+      const db = 20 * Math.log10(Math.max(totalMag[i], 1e-9));
+      if (db > maxBoostDb) maxBoostDb = db;
+    }
+    return Math.max(0, maxBoostDb);
+  } catch (e) {
+    return Math.max(0, ...filters.map(f => f.gainDb));
+  }
+}
+
 function sanitizeHeadphoneProfile(profile) {
   const allowed = ["peaking", "lowshelf", "highshelf", "lowpass", "highpass"];
   const filters = (profile.filters || [])
@@ -162,14 +200,16 @@ function sanitizeHeadphoneProfile(profile) {
       Q: Math.max(0.1, Math.min(8, f.Q ?? 1))
     }))
     .slice(0, 12);
-  const maxBoostDb = Math.max(0, ...filters.map(f => f.gainDb));
+    
+  const maxBoostDb = computeAutoEqCurveMaxBoostDb(filters);
   const safePreampDb = Math.min(profile.preampDb ?? 0, -(maxBoostDb + 0.7));
+  
   return {
     ...profile,
     filters,
     maxBoostDb,
     preampDb: safePreampDb,
-    safety: safePreampDb <= -(maxBoostDb + 0.7) ? "OK" : "ADJUSTED"
+    safety: profile.preampDb <= safePreampDb ? "OK" : "ADJUSTED"
   };
 }
 

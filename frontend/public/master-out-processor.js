@@ -3,6 +3,7 @@ class MasterOutProcessor extends AudioWorkletProcessor {
     super();
     this.ceiling = Math.pow(10, -1.0 / 20); // ~0.891
     this.peakSq = 0;
+    this.prePeakSq = 0;
     this.clipCount = 0;
     this.frames = 0;
     this.sampleRate = 44100; // Será injetado, mas usamos padrão
@@ -21,6 +22,9 @@ class MasterOutProcessor extends AudioWorkletProcessor {
       const outData = output[channel] || new Float32Array(inData.length);
       
       for (let i = 0; i < inData.length; i++) {
+        const inSq = inData[i] * inData[i];
+        if (inSq > this.prePeakSq) this.prePeakSq = inSq;
+        
         let sample = inData[i];
         
         // Hard Clip (Peak Guard Airbag)
@@ -50,17 +54,21 @@ class MasterOutProcessor extends AudioWorkletProcessor {
     // Envia telemetria ~2x por segundo
     if (this.frames >= 44100 * 0.5) {
       const peakAmp = Math.sqrt(this.peakSq);
+      const prePeakAmp = Math.sqrt(this.prePeakSq);
       const peakDb = peakAmp > 1e-6 ? 20 * Math.log10(peakAmp) : -100;
+      const prePeakDb = prePeakAmp > 1e-6 ? 20 * Math.log10(prePeakAmp) : -100;
       
       this.port.postMessage({
         type: "telemetry",
         name: "MasterOut",
         peakDb: peakDb.toFixed(1),
+        peakPreMasterDb: prePeakDb.toFixed(1),
         clipCount: this.clipCount
       });
       
       this.frames = 0;
       this.peakSq = 0;
+      this.prePeakSq = 0;
       this.clipCount = 0;
     }
 
