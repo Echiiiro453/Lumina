@@ -77,7 +77,24 @@ export async function runAudioTest(test, progressCallback) {
 
   if (test.config.replayGain) { const rg = ctx.createGain(); rg.gain.value = 0.5; head.connect(rg); head = rg; }
   if (test.config.bass) { const bg = ctx.createGain(); bg.gain.value = 1.2; head.connect(bg); head = bg; }
-  if (test.config.dangerousProfile) { const eq = ctx.createGain(); eq.gain.value = 2.0; head.connect(eq); head = eq; }
+  
+  if (test.config.dangerousProfile) { 
+    // Simula +6dB de Boost do perfil
+    const eq = ctx.createGain(); eq.gain.value = 2.0; 
+    // Simula a proteção de PreAmp (-6.7dB = ~0.46)
+    const preamp = ctx.createGain(); preamp.gain.value = Math.pow(10, -6.7 / 20);
+    head.connect(eq); eq.connect(preamp); head = preamp; 
+  }
+  
+  if (test.config.deEsser || test.config.deHarsh) {
+    // Simula a atuação do DeEsser cortando -6dB nas sibilâncias
+    const deEsser = ctx.createBiquadFilter();
+    deEsser.type = "peaking";
+    deEsser.frequency.value = 8000;
+    deEsser.Q.value = 2.0;
+    deEsser.gain.value = -6.0;
+    head.connect(deEsser); head = deEsser;
+  }
 
   let limiterNode;
   try {

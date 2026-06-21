@@ -46,6 +46,10 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
       targetSideGain = 0.7; // Tame mild anti-phase
     }
 
+    let postSumL2 = 0;
+    let postSumR2 = 0;
+    let postSumLR = 0;
+
     for (let i = 0; i < L.length; i++) {
       this.sideGain = this.sideGain * 0.99 + targetSideGain * 0.01; // Smooth transition
       
@@ -58,14 +62,20 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
       // Apply Governor
       side *= this.sideGain;
 
+      let outL = (mid + side) * Math.SQRT1_2;
+      let outR = (mid - side) * Math.SQRT1_2;
+
       // Reconstruct
       if (output && output.length >= 2) {
-        output[0][i] = (mid + side) * Math.SQRT1_2;
-        output[1][i] = (mid - side) * Math.SQRT1_2;
+        output[0][i] = outL;
+        output[1][i] = outR;
       }
 
       sumMid2 += mid * mid;
       sumSide2 += side * side;
+      postSumL2 += outL * outL;
+      postSumR2 += outR * outR;
+      postSumLR += outL * outR;
 
       if (i % 8 === 0) points.push([side, mid]);
     }
@@ -77,8 +87,8 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
       const midRMS = Math.sqrt(sumMid2 / n);
       const sideRMS = Math.sqrt(sumSide2 / n);
 
-      // Use smoothed block correlation for UI
-      const corr = blockCorr;
+      // Use POST-governor correlation for accurate telemetry
+      const corr = postSumLR / Math.sqrt((postSumL2 * postSumR2) + this.EPS);
       const width = sideRMS / (midRMS + this.EPS);
       const widthDb = 20 * Math.log10(width + this.EPS);
 
