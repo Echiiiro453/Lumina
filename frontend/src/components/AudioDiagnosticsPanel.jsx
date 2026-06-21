@@ -24,6 +24,7 @@ export function AudioDiagnosticsPanel({
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
   eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef, masterTelemetryRef,
+  analyserLRef, analyserRRef
 }) {
   const canvasRef = useRef(null);
   const curveCanvasRef = useRef(null);
@@ -33,6 +34,9 @@ export function AudioDiagnosticsPanel({
   const [lufs, setLufs] = useState(null);
   const [reduction, setReduction] = useState(null);
   const [masterTelemetry, setMasterTelemetry] = useState(null);
+
+  const vectorCanvasRef = useRef(null);
+  const [vectorMetrics, setVectorMetrics] = useState({ correlation: 0, width: 0, phaseRisk: 'LOW' });
 
   // ---- Inspect all nodes ------------------------------------------------
   useEffect(() => {
@@ -161,6 +165,69 @@ export function AudioDiagnosticsPanel({
     }, 200);
     return () => clearInterval(interval);
   }, [isOpen, masterTelemetryRef]);
+
+  // ---- Stereo Vectorscope / Goniometer -----------------------------------
+  useEffect(() => {
+    if (!isOpen || !vectorCanvasRef.current) return;
+    const canvas = vectorCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    let raf;
+    let frameCount = 0;
+
+    const drawVectorscope = () => {
+      raf = requestAnimationFrame(drawVectorscope);
+      
+      const tele = stereoTelemetryRef?.current;
+      if (!tele) return;
+
+      const W = canvas.width, H = canvas.height;
+      
+      // Efeito de rastro (Fade out)
+      ctx.fillStyle = 'rgba(10, 10, 10, 0.4)';
+      ctx.fillRect(0, 0, W, H);
+
+      // Grid central (cruz)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H);
+      ctx.moveTo(0, H/2); ctx.lineTo(W, H/2);
+      ctx.stroke();
+
+      if (tele.points && tele.points.length > 0) {
+        ctx.beginPath();
+        // Se correlation for negativa, muda a cor pra alertar
+        ctx.strokeStyle = parseFloat(tele.corr) < 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(139, 92, 246, 0.8)';
+        ctx.lineWidth = 1.5;
+
+        for (let i = 0; i < tele.points.length; i++) {
+          const [side, mid] = tele.points[i];
+          
+          const x = (W / 2) + (side * (W / 2));
+          const y = (H / 2) - (mid * (H / 2));
+
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
+      frameCount++;
+      if (frameCount % 6 === 0) { // Update metrics UI
+        setVectorMetrics({
+          correlation: parseFloat(tele.corr || 0),
+          width: parseFloat(tele.widthPercent || 0),
+          phaseRisk: tele.phaseRisk || 'LOW',
+          midRMSDb: tele.midRMSDb || '-INF',
+          sideRMSDb: tele.sideRMSDb || '-INF',
+          monoCompatible: tele.monoCompatible
+        });
+      }
+    };
+
+    drawVectorscope();
+    return () => cancelAnimationFrame(raf);
+  }, [isOpen, stereoTelemetryRef]);
 
   // Canvas unificado (Espectro + Curva)
 
@@ -435,6 +502,61 @@ export function AudioDiagnosticsPanel({
                 </div>
               </div>
             )}
+            </div>
+
+            {/* Stereo Vectorscope */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2 flex items-center gap-1">
+                <Radio size={10} /> Stereo Vectorscope & Phase Meter
+              </p>
+              <div className="flex gap-4 items-center bg-surface-container rounded-2xl p-4 border border-outline-variant/20">
+                <div className="w-[140px] h-[140px] bg-[#0a0a0a] rounded-full border border-outline-variant/20 overflow-hidden relative shadow-inner">
+                   <canvas
+                     ref={vectorCanvasRef}
+                     width={140}
+                     height={140}
+                     className="absolute inset-0"
+                   />
+                </div>
+                <div className="flex-1 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Correlation</p>
+                    <p className={`text-xl font-mono font-bold ${vectorMetrics.correlation < 0 ? 'text-error' : 'text-primary'}`}>
+                      {vectorMetrics.correlation > 0 ? '+' : ''}{vectorMetrics.correlation.toFixed(2)}
+                    </p>
+                    <div className="w-full bg-surface-container-highest h-1.5 rounded-full mt-1 overflow-hidden flex">
+                       <div className="h-full bg-error" style={{ width: '50%', transformOrigin: 'right', transform: `scaleX(${vectorMetrics.correlation < 0 ? Math.abs(vectorMetrics.correlation) : 0})` }} />
+                       <div className="h-full bg-primary" style={{ width: '50%', transformOrigin: 'left', transform: `scaleX(${vectorMetrics.correlation > 0 ? vectorMetrics.correlation : 0})` }} />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Stereo Width</p>
+                    <p className="text-xl font-mono font-bold text-primary">
+                      {vectorMetrics.width.toFixed(1)}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Mid</p>
+                    <p className="text-sm font-mono font-bold text-on-surface">{vectorMetrics.midRMSDb} dB</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Side</p>
+                    <p className="text-sm font-mono font-bold text-on-surface">{vectorMetrics.sideRMSDb} dB</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Phase Risk</p>
+                    <p className={`text-sm font-mono font-bold ${vectorMetrics.phaseRisk === 'HIGH' ? 'text-error' : vectorMetrics.phaseRisk === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400'}`}>
+                      {vectorMetrics.phaseRisk}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase text-on-surface-variant/60 font-bold">Mono</p>
+                    <p className={`text-sm font-mono font-bold ${vectorMetrics.monoCompatible ? 'text-green-400' : 'text-error'}`}>
+                      {vectorMetrics.monoCompatible ? 'OK' : 'RISCO'}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Node Status List */}

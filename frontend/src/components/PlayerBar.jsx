@@ -325,6 +325,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const bassEnhancerGainRef = useRef(null);
   const bassShaperRef = useRef(null);
   const preGainRef = useRef(null);
+  
+  const stereoScopeRef = useRef(null);
+  const stereoTelemetryRef = useRef(null);
   const limiterRef = useRef(null);
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
@@ -1519,7 +1522,45 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       // Input 2: RAW (Source direct)
       source.connect(abComparatorNode, 0, 2);
 
-      abComparatorNode.connect(limiterNode);
+      // --- Stereo Scope / Vectorscope ---
+      let stereoScopeNode;
+      try {
+        await loadModule('/stereo-scope-processor.js');
+        stereoScopeNode = new AudioWorkletNode(audioCtx, 'stereo-scope-processor', {
+           numberOfInputs: 1,
+           numberOfOutputs: 1,
+           outputChannelCount: [2]
+        });
+        
+        let lastScopeLogTime = 0;
+        stereoScopeNode.port.onmessage = (e) => {
+           if (e.data.type === 'telemetry') {
+              stereoTelemetryRef.current = e.data;
+              const now = Date.now();
+              // To avoid log spam, we update ref for canvas fast, but log to CMD every 2s
+              if (now - lastScopeLogTime > 2000) {
+                 logToCMD("DSP-StereoScope", JSON.stringify({
+                   type: "telemetry",
+                   name: "StereoScope",
+                   corr: e.data.corr,
+                   midRMSDb: e.data.midRMSDb,
+                   sideRMSDb: e.data.sideRMSDb,
+                   widthDb: e.data.widthDb,
+                   phaseRisk: e.data.phaseRisk
+                 }), e.data.phaseRisk === "HIGH" ? "error" : e.data.phaseRisk === "MEDIUM" ? "warn" : "info");
+                 lastScopeLogTime = now;
+              }
+           }
+        };
+      } catch (e) {
+        console.warn("Stereo Scope load failed", e);
+        stereoScopeNode = audioCtx.createGain(); // Fallback
+      }
+      stereoScopeRef.current = stereoScopeNode;
+
+      abComparatorNode.connect(stereoScopeNode);
+      stereoScopeNode.connect(limiterNode);
+      
       truePeakNode.connect(audioCtx.destination);
       
       audioContextRef.current = audioCtx;
@@ -2350,6 +2391,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           masterTelemetryRef={masterTelemetryRef}
           analyserLRef={analyserLRef}
           analyserRRef={analyserRRef}
+          stereoTelemetryRef={stereoTelemetryRef}
         />
       )}
     </>
