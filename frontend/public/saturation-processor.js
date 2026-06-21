@@ -16,9 +16,9 @@
 class SaturationProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.mode  = 'tube';
+    this.mode = 'tube';
     this.drive = 0.3;  // 0–1
-    this.mix   = 0.25; // wet/dry 0–1
+    this.mix = 0.25; // wet/dry 0–1
 
     this.prevX = null;     // Stored per-channel history: Float32Array(2) per channel: [x(n-1), x(n-2)]
     this.rmsIn = null;     // Short-term RMS energy tracking for input
@@ -31,12 +31,12 @@ class SaturationProcessor extends AudioWorkletProcessor {
     this.port.onmessage = ({ data }) => {
       let changed = false;
       if (data.active !== undefined) this.active = !!data.active;
-      if (data.mode  !== undefined) this.mode  = data.mode;
+      if (data.mode !== undefined) this.mode = data.mode;
       if (data.drive !== undefined) {
         this.drive = data.drive;
         changed = true;
       }
-      if (data.mix   !== undefined) this.mix   = data.mix;
+      if (data.mix !== undefined) this.mix = data.mix;
 
       if (changed) {
         this.recalcCoefficients();
@@ -151,11 +151,11 @@ class SaturationProcessor extends AudioWorkletProcessor {
   _smoothDiffF2(xa, xb, F2_a, F2_b, F1_mid, eps) {
     const d = xa - xb;
     const absD = Math.abs(d);
-    
+
     // Gating parameter: computes the normalized error of the division operation
     const u = Math.min(1.0, absD / eps);
     const w = u * u * (3 - 2 * u);
-    
+
     const term1 = (u >= 1.0) ? (F2_a - F2_b) / d : (d / (eps * eps)) * (3 - 2 * u) * (F2_a - F2_b);
     return term1 + (1 - w) * F1_mid;
   }
@@ -209,7 +209,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
     for (let ch = 0; ch < chs; ch++) {
       const inCh = input[ch], outCh = output[ch];
       if (!outCh) continue;
-      
+
       const chHist = this.prevX[ch];
       let x1 = chHist[0]; // x(n-1)
       let x2 = chHist[1]; // x(n-2)
@@ -220,10 +220,10 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
       for (let i = 0; i < inCh.length; i++) {
         const xOrig = inCh[i];
-        
+
         // Safeguard original input for clean dry mix path
         const xOrigSafe = (isNaN(xOrig) || !isFinite(xOrig)) ? 0.0 : xOrig;
-        
+
         // 0. Pre-Saturation High-Pass Filter (fc ~ 30Hz)
         // Corta os subgraves que causam "fuzz" na válvula, preservando-os no Dry Signal.
         const R = 1 - (Math.PI * 2 * 30.0) / 48000;
@@ -239,7 +239,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.lowShelfY[ch] = (1 - alpha) * preFilter + alpha * this.lowShelfY[ch];
         const lowBand = this.lowShelfY[ch];
         const highBand = preFilter - lowBand;
-        
+
         let x = highBand + lowBand * 0.841; // 10^(-1.5/20) = 0.841 (-1.5dB)
 
         // Fast RMS for instant noise gating (tau ~ 2ms)
@@ -322,7 +322,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
           // Domain updates (asymmetric hysteretic rates with Soft-Sign for C1 continuity)
           // Using Math.tanh(deltaH / 0.05) instead of Math.sign(deltaH) eliminates "radio tuning" zipper noise
           const softSign = Math.tanh(deltaH / 0.05);
-          
+
           const rate1 = 0.30 * (1.0 + 0.5 * softSign * Math.tanh(M1 / 0.5));
           const nextM1 = M1 + rate1 * (Math.tanh(H_eff1 * 2.0) - M1);
           const dM1 = nextM1 - M1;
@@ -407,7 +407,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
           // Gating noise floor by FAST RMS to prevent 2-second AGC amplification during silence
           const noiseGate = Math.tanh(this.fastRmsIn[ch] * 5000.0);
           const tapeNoise = (lfN * lfNoiseLevel + hfN * hfNoiseLevel + barkhausenNoise) * noiseGate;
-          
+
           xFeed = M + tapeNoise;
         }
 
@@ -419,24 +419,24 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const absD1 = Math.abs(d1);
         const absD2 = Math.abs(d2);
         const absD3 = Math.abs(d3);
-        
+
         // Acceleration / Curvature parameter
         const absD2x = Math.abs(xFeed - 2 * x1 + x2);
 
         // Scale-Normalized Adaptive Thresholds with relaxed tolerance to prevent division by zero instability
         const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
         const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-6;
-        
+
         const eps1 = 1e-3 * env + 1e-5;
         const eps2 = 1e-3 * envPrev + 1e-5;
         const eps3 = 1e-3 * env + 1e-3 * absD2x + 1e-5;
 
         // 3. Pre-evaluate antiderivative levels (Unified F2)
-        const F2_x  = this._F2_mode(xFeed);
+        const F2_x = this._F2_mode(xFeed);
         const F2_x1 = this._F2_mode(x1);
         const F2_x2 = this._F2_mode(x2);
 
-        const F1_x  = this._F1_mode(xFeed);
+        const F1_x = this._F1_mode(xFeed);
         const F1_x1 = this._F1_mode(x1);
 
         const xMid12 = 0.5 * (xFeed + x1);
@@ -469,10 +469,10 @@ class SaturationProcessor extends AudioWorkletProcessor {
         const postDcLastIn = this.postDcX[ch];
         this.postDcX[ch] = finalSignal;
         this.postDcY[ch] = finalSignal - postDcLastIn + R_post * this.postDcY[ch];
-        
+
         // Safety Soft-Clipper para proteger o DAC da placa de som
         outCh[i] = Math.tanh(this.postDcY[ch]);
-        
+
         if (ch === 0) {
           this._dbgIn = (this._dbgIn || 0) + xOrigSafe * xOrigSafe;
           this._dbgOut = (this._dbgOut || 0) + outCh[i] * outCh[i];
