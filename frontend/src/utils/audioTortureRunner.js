@@ -19,7 +19,8 @@ function createTestBuffer(ctx, signalType, durationSeconds) {
   } else if (signalType === "phaseRisk" || signalType === "dangerousPhase") {
     for (let i = 0; i < length; i++) {
       const s = Math.sin(2 * Math.PI * 440 * i / sampleRate) * 0.4;
-      L[i] = s; R[i] = -s * 0.7;
+      const m = Math.sin(2 * Math.PI * 880 * i / sampleRate) * 0.1; // small mono signal
+      L[i] = s + m; R[i] = -s + m;
     }
   } else if (signalType === "bassTorture") {
     for (let i = 0; i < length; i++) {
@@ -80,7 +81,7 @@ export async function runAudioTest(test, progressCallback) {
 
   let limiterNode;
   try {
-    limiterNode = new AudioWorkletNode(ctx, 'master-out-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    limiterNode = new AudioWorkletNode(ctx, 'master-out', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     limiterNode.port.onmessage = e => { if (e.data.type === 'telemetry') telemetry.push(e.data); };
   } catch(e) { limiterNode = ctx.createGain(); }
 
@@ -97,6 +98,10 @@ export async function runAudioTest(test, progressCallback) {
 
   if (progressCallback) progressCallback(`Renderizando: ${test.name}`);
   const rendered = await ctx.startRendering();
+  
+  // Aguarda a fila de mensagens do Worklet (assíncrona) ser processada
+  await new Promise(r => setTimeout(r, 50));
+  
   return analyzeRenderedBuffer(test, rendered, telemetry);
 }
 
