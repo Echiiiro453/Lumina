@@ -289,6 +289,13 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const autoEqPreampRef = useRef(null);
   const autoEqFiltersRef = useRef([]);
 
+  // --- AB Comparator ---
+  const [abMode, setAbMode] = useState('PROCESSED');
+  const [abBlend, setAbBlend] = useState(1.0);
+  const abComparatorRef = useRef(null);
+  const abModeRef = useRef('PROCESSED');
+  const abBlendRef = useRef(1.0);
+
   const [enable8D, setEnable8D] = useState(false);
   const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
@@ -661,6 +668,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }), "info");
 
   }, [autoEqProfile, autoEqAmount]);
+
+  useEffect(() => {
+    abModeRef.current = abMode;
+    abBlendRef.current = abBlend;
+    if (abComparatorRef.current && abComparatorRef.current.port) {
+       abComparatorRef.current.port.postMessage({ mode: abMode, blend: abBlend });
+    }
+  }, [abMode, abBlend]);
 
   useEffect(() => {
     let currentPreset = ROOM_PRESETS[spatialMode] || ROOM_PRESETS["Estúdio"];
@@ -1458,7 +1473,53 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       splitter.connect(analyserL, 0);
       splitter.connect(analyserR, 1);
       
-      analyser.connect(limiterNode);
+      // --- AB Comparator ---
+      let abComparatorNode;
+      try {
+        await loadModule('/ab-comparator-processor.js');
+        abComparatorNode = new AudioWorkletNode(audioCtx, 'ab-comparator-processor', {
+           numberOfInputs: 3,
+           numberOfOutputs: 1,
+           outputChannelCount: [2]
+        });
+        
+        abComparatorNode.port.postMessage({ mode: abModeRef.current, blend: abBlendRef.current });
+        
+        let lastAbLogTime = 0;
+        abComparatorNode.port.onmessage = (e) => {
+           if (e.data.type === 'telemetry') {
+              const now = Date.now();
+              if (now - lastAbLogTime > 2000) {
+                 logToCMD("DSP-ABCompare", JSON.stringify({
+                   type: "telemetry",
+                   name: "ABCompare",
+                   mode: abModeRef.current,
+                   blend: abBlendRef.current.toFixed(2),
+                   refRMSDb: (20 * Math.log10(Math.max(e.data.refRMS, 1e-12))).toFixed(1),
+                   procRMSDb: (20 * Math.log10(Math.max(e.data.procRMS, 1e-12))).toFixed(1),
+                   diffRMSDb: (20 * Math.log10(Math.max(e.data.diffRMS, 1e-12))).toFixed(1)
+                 }), "info");
+                 lastAbLogTime = now;
+              }
+           }
+        };
+      } catch (e) {
+        console.warn("AB Comparator load failed", e);
+        abComparatorNode = audioCtx.createGain(); // Fallback
+      }
+      abComparatorRef.current = abComparatorNode;
+      
+      // Routing to AB Comparator
+      // Input 0: Calibrated Reference (AutoEQ out)
+      autoEqFilters[11].connect(abComparatorNode, 0, 0);
+      
+      // Input 1: Processed (Analyser out)
+      analyser.connect(abComparatorNode, 0, 1);
+      
+      // Input 2: RAW (Source direct)
+      source.connect(abComparatorNode, 0, 2);
+
+      abComparatorNode.connect(limiterNode);
       truePeakNode.connect(audioCtx.destination);
       
       audioContextRef.current = audioCtx;
@@ -2261,6 +2322,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           enableStereoDepth={enableStereoDepth} setEnableStereoDepth={setEnableStereoDepth}
           stereoDepthAmount={stereoDepthAmount} setStereoDepthAmount={setStereoDepthAmount}
           enableReplayGain={enableReplayGain} setEnableReplayGain={setEnableReplayGain}
+          autoEqProfile={autoEqProfile} setAutoEqProfile={setAutoEqProfile}
+          autoEqAmount={autoEqAmount} setAutoEqAmount={setAutoEqAmount}
+          abMode={abMode} setAbMode={setAbMode}
+          abBlend={abBlend} setAbBlend={setAbBlend}
         />
       )}
 

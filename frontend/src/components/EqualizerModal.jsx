@@ -125,7 +125,10 @@ export function EqualizerModal({
   enableReplayGain, setEnableReplayGain,
   
   autoEqProfile, setAutoEqProfile,
-  autoEqAmount, setAutoEqAmount
+  autoEqAmount, setAutoEqAmount,
+  
+  abMode, setAbMode,
+  abBlend, setAbBlend
 }) {
   const [activeTab, setActiveTab] = useState('eq');
 
@@ -399,6 +402,50 @@ export function EqualizerModal({
 
             {activeTab === 'fx' && (
               <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} className="space-y-8">
+                
+                {/* A/B Comparator */}
+                <div className="border border-[var(--md-sys-color-tertiary)]/30 bg-[var(--md-sys-color-tertiary-container)]/10 rounded-[24px] p-6 mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-[var(--md-sys-color-on-surface)] flex items-center space-x-2">
+                        <RefreshCw size={18} className="text-[var(--md-sys-color-tertiary)]" />
+                        <span>A/B Comparator</span>
+                      </h3>
+                      <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mt-1">Compare o áudio processado com a referência calibrada.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex space-x-2 mb-6">
+                    {[
+                      { id: 'RAW', label: 'Raw' },
+                      { id: 'CALIBRATED', label: 'Ref (Calibrada)' },
+                      { id: 'PROCESSED', label: 'Mix (DSP)' }
+                    ].map(mode => (
+                      <button
+                        key={mode.id}
+                        onClick={() => setAbMode && setAbMode(mode.id)}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${abMode === mode.id ? 'bg-[var(--md-sys-color-tertiary)] text-[var(--md-sys-color-on-tertiary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)]/10'}`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {abMode === 'PROCESSED' && (
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="text-xs font-bold text-[var(--md-sys-color-on-surface)]">A/B Blend (Crossfade)</label>
+                        <span className="text-xs font-mono text-[var(--md-sys-color-tertiary)] font-bold">{abBlend === 0 ? 'A (Referência)' : abBlend === 1 ? 'B (DSP)' : `${Math.round(abBlend * 100)}% B`}</span>
+                      </div>
+                      <input
+                        type="range" min="0" max="1" step="0.01"
+                        value={abBlend === undefined ? 1.0 : abBlend} onChange={(e) => setAbBlend && setAbBlend(parseFloat(e.target.value))}
+                        className="w-full studio-fader cursor-pointer"
+                        style={{ '--fader-color': 'var(--md-sys-color-tertiary)' }}
+                      />
+                    </div>
+                  )}
+                </div>
                 
                 {/* Presets Rápidos */}
                 <div>
