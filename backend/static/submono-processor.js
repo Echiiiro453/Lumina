@@ -70,6 +70,10 @@ class SubMonoProcessor extends AudioWorkletProcessor {
     }
     const inL = input[0], inR = input[1];
     const outL = output[0], outR = output[1];
+    
+    let blockSubMid = 0;
+    let blockSubSide = 0;
+    let blockHarm = 0;
 
     for (let i = 0; i < inL.length; i++) {
       const L = inL[i];
@@ -78,6 +82,10 @@ class SubMonoProcessor extends AudioWorkletProcessor {
       const subL = this._bq(L, this.lpf, this.lpzL);
       const subR = this._bq(R, this.lpf, this.lpzR);
       const mono  = (subL + subR) * 0.5;
+      const side  = (subL - subR) * 0.5;
+      
+      blockSubMid += mono * mono;
+      blockSubSide += side * side;
       
       // ── Psychoacoustic Bass Recovery ──
       // Generate 2nd and 3rd harmonics from sub-bass to trigger the "missing fundamental"
@@ -107,7 +115,39 @@ class SubMonoProcessor extends AudioWorkletProcessor {
       
       outL[i] = hiL + mono + this.bassRecovery * vhp_hL;
       outR[i] = hiR + mono + this.bassRecovery * vhp_hR;
+      
+      blockHarm += (vhp_hL * vhp_hL + vhp_hR * vhp_hR) * 0.5;
     }
+    
+    if (this.active) {
+      this._dbgMid = (this._dbgMid || 0) + blockSubMid;
+      this._dbgSide = (this._dbgSide || 0) + blockSubSide;
+      this._dbgHarm = (this._dbgHarm || 0) + blockHarm;
+      this._telemetryCount = (this._telemetryCount || 0) + 1;
+      
+      if (this._telemetryCount >= 60) {
+        const midRms = Math.sqrt(this._dbgMid);
+        const sideRms = Math.sqrt(this._dbgSide);
+        const widthBefore = (midRms > 1e-6) ? (sideRms / midRms) : 0.000;
+        
+        const samples = 60 * inL.length;
+        const harmRms = Math.sqrt(this._dbgHarm / samples);
+        
+        this.port.postMessage({
+          type: 'telemetry',
+          name: 'SubMono',
+          widthBefore: widthBefore.toFixed(3),
+          widthAfter: "0.000",
+          harmonicRecovery: harmRms.toFixed(3)
+        });
+        
+        this._dbgMid = 0;
+        this._dbgSide = 0;
+        this._dbgHarm = 0;
+        this._telemetryCount = 0;
+      }
+    }
+    
     return true;
   }
 }

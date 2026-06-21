@@ -9,8 +9,8 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.active = false;
         const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
-    // Detection BPF centered at 6kHz, Q=2.5
-    const fc = 6000, Q = 2.5;
+    // Detection BPF centered at 6200Hz, Q=2.8
+    const fc = 6200, Q = 2.8;
     const w0 = 2 * Math.PI * fc / sr;
     const cosW0 = Math.cos(w0), sinW0 = Math.sin(w0);
     const alpha = sinW0 / (2 * Q);
@@ -22,14 +22,15 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     this.detZ = [0, 0];
 
     // Envelope follower
-    const atkMs = 2.0, relMs = 60.0;
+    const atkMs = 2.0, relMs = 40.0;
     this.aAtk = Math.exp(-1 / (sr * atkMs  / 1000));
     this.aRel = Math.exp(-1 / (sr * relMs / 1000));
     this.env  = 0;
 
-    // Threshold linear (~-22dBFS in the sibilance band) and max GR (-6dB)
-    this.threshold = 0.08;
-    this.maxGR     = Math.pow(10, -6 / 20); // 0.501
+    // Classic Logarithmic Compressor Parameters
+    this.threshold = 0.035;
+    this.ratio = 3.5;
+    this.maxGR = Math.pow(10, -5.0 / 20); // Limite hard em -5.0dB (0.562)
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
@@ -56,29 +57,76 @@ class DeEsserProcessor extends AudioWorkletProcessor {
     const input = inputs[0], output = outputs[0];
     if (!input || !input[0]) return true;
 
+    let sumIn = 0;
+    let maxEnv = 0;
+    let minGain = 1.0;
+
     for (let i = 0; i < input[0].length; i++) {
       // Stereo-aware: combine Left and Right channels for detection
       const sampleL = input[0][i];
       const sampleR = input[1] ? input[1][i] : sampleL;
       const monoSample = (sampleL + sampleR) * 0.5;
 
-      const det = Math.abs(this._bq(monoSample, this.bpf, this.detZ));
+      sumIn += monoSample * monoSample;
+      const detVal = this._bq(monoSample, this.bpf, this.detZ);
+      const det = Math.abs(detVal);
       this.env = det > this.env
         ? this.aAtk * this.env + (1 - this.aAtk) * det
         : this.aRel * this.env + (1 - this.aRel) * det;
+        
+      if (this.env > maxEnv) maxEnv = this.env;
 
-      // Gain computation (soft knee)
+      // Classic Compressor Gain computation (Logarithmic Domain)
       let gain = 1.0;
       if (this.env > this.threshold) {
-        const excess = this.env / this.threshold;
-        const gr = 1.0 - (1.0 - this.maxGR) * Math.min(1.0, excess - 1.0);
-        gain = Math.max(this.maxGR, gr);
+        const envDb = 20 * Math.log10(this.env + 1e-12);
+        const threshDb = 20 * Math.log10(this.threshold + 1e-12);
+        
+        // excessDb é o quanto passou do Threshold
+        const excessDb = envDb - threshDb;
+        
+        // gainReductionDb = -excess * (1 - 1/Ratio)
+        const gainReductionDb = -excessDb * (1.0 - 1.0 / this.ratio);
+        
+        const grLinear = Math.pow(10, gainReductionDb / 20);
+        gain = Math.max(this.maxGR, grLinear); // Clamp em -6dB
       }
 
       for (let ch = 0; ch < input.length; ch++) {
         if (output[ch]) output[ch][i] = input[ch][i] * gain;
       }
+      if (gain < minGain) minGain = gain;
     }
+
+    if (this.active) {
+      this._dbgIn = (this._dbgIn || 0) + sumIn;
+      this._dbgMaxEnv = Math.max(this._dbgMaxEnv || 0, maxEnv);
+      this._dbgMinGain = Math.min(this._dbgMinGain || 1.0, minGain);
+      this._telemetryCount = (this._telemetryCount || 0) + 1;
+      
+      if (this._telemetryCount >= 60) {
+        const samples = 60 * input[0].length;
+        const inRMS = Math.sqrt(this._dbgIn / samples);
+        const peakEnv = this._dbgMaxEnv;
+        const gainReductionDb = 20 * Math.log10(this._dbgMinGain + 1e-12);
+        
+        this.port.postMessage({
+          type: 'telemetry',
+          name: 'DeEsser',
+          inRMS: inRMS.toFixed(3),
+          peakEnv: peakEnv.toFixed(3),
+          gainReduction: gainReductionDb.toFixed(1) + 'dB',
+          threshold: this.threshold.toFixed(3),
+          triggered: this._dbgMinGain < 0.99
+        });
+        
+        this._dbgIn = 0;
+        this._dbgMaxEnv = 0;
+        this._dbgMinGain = 1.0;
+        this._telemetryCount = 0;
+      }
+    }
+
     return true;
   }
 }
