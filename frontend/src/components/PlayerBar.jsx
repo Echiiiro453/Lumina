@@ -32,6 +32,39 @@ const createReverbIR = (audioCtx, duration, decay) => {
   return impulse;
 };
 
+const loadIR = async (audioCtx, preset) => {
+  const fileMap = {
+     'Pequena': 'room_small.wav',
+     'Concerto': 'concert_hall.wav',
+     'Estádio': 'stadium.wav',
+     'Vastidão': 'vast_space.wav',
+     'Catedral': 'cathedral.wav',
+     'Club': 'club.wav'
+  };
+  const filename = fileMap[preset];
+  if (!filename) return createReverbIR(audioCtx, 3.5, 2.5);
+  
+  try {
+    const response = await fetch(`/irs/${filename}`);
+    if (!response.ok) throw new Error("IR file not found");
+    const arrayBuffer = await response.arrayBuffer();
+    return await audioCtx.decodeAudioData(arrayBuffer);
+  } catch (e) {
+    // Fallback Procedural caso o arquivo WAV falhe
+    let duration = 3.5, decay = 2.5;
+    switch (preset) {
+      case 'Pequena': duration = 0.8; decay = 5.0; break;
+      case 'Catedral': duration = 5.0; decay = 1.2; break;
+      case 'Club': duration = 1.2; decay = 4.0; break;
+      case 'Concerto': duration = 2.5; decay = 3.0; break;
+      case 'Estádio': duration = 3.5; decay = 2.0; break;
+      case 'Vastidão': duration = 6.0; decay = 1.0; break;
+    }
+    return createReverbIR(audioCtx, duration, decay);
+  }
+};
+
+
 const makeExciterCurve = (amount) => {
   const n = 256;
   const curve = new Float32Array(n);
@@ -143,7 +176,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
   const crossfadeTimeoutRef = useRef(null);
-  const masterTelemetryRef = useRef(null);  
+  const masterTelemetryRef = useRef(null);
+  const analyserLRef = useRef(null);
+  const analyserRRef = useRef(null);
   const workletAnchorRef = useRef({ pre: null, post: null });
   const loadedModulesRef = useRef({}); // To track which modules are loaded
 
@@ -658,12 +693,32 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     };
   }, [enable8D, motionMode, motionSpeed, motionRadius, isPlaying]);
 
+  // Atualizador dinâmico de Impulse Responses (Convolution Reverb)
+  useEffect(() => {
+    const updateIR = async () => {
+       if (!audioContextRef.current || !reverbNodeRef.current) return;
+       const ctx = audioContextRef.current;
+       const buffer = await loadIR(ctx, spatialMode);
+       if (reverbNodeRef.current) {
+          reverbNodeRef.current.buffer = buffer;
+       }
+    };
+    updateIR();
+  }, [spatialMode]);
+
   const initAudioVisualizer = async () => {
     if (!audioRef.current || audioContextRef.current) return;
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
+      
+      const splitter = audioCtx.createChannelSplitter(2);
+      const analyserL = audioCtx.createAnalyser();
+      analyserL.fftSize = 2048;
+      const analyserR = audioCtx.createAnalyser();
+      analyserR.fftSize = 2048;
+      
       const mediaSource = audioCtx.createMediaElementSource(audioRef.current);
       const source = audioCtx.createGain(); // Mixer bus
       mediaSource.connect(source);
@@ -901,7 +956,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       
       // Convolver Engine (Sempre conectado para alimentar Input 1 do Telemetry Node)
       const convolver = audioCtx.createConvolver();
-      convolver.buffer = createReverbIR(audioCtx, 3.5, 2.5);
+      convolver.buffer = await loadIR(audioCtx, spatialMode);
       reverbNodeRef.current = convolver;
       
       // Filtros de Proteção para a cauda do Reverb (HPF 150Hz, LPF 10kHz)
@@ -1063,11 +1118,19 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       finalNode.connect(panner8DNode);
       panner8DNode.connect(analyser);
+      
+      // Conectar Splitter para o Vectorscope
+      panner8DNode.connect(splitter);
+      splitter.connect(analyserL, 0);
+      splitter.connect(analyserR, 1);
+      
       analyser.connect(limiterNode);
       truePeakNode.connect(audioCtx.destination);
       
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
+      analyserLRef.current = analyserL;
+      analyserRRef.current = analyserR;
       
       logToCMD("DSP", "Pipeline de AudioWorklets inicializada (Zero NaNs)", "success");
       
@@ -1885,6 +1948,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           wetHighEqRef={wetHighEqRef}
           wetLpfRef={wetLpfRef}
           masterTelemetryRef={masterTelemetryRef}
+          analyserLRef={analyserLRef}
+          analyserRRef={analyserRRef}
         />
       )}
     </>
