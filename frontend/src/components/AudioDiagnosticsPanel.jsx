@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu } from 'lucide-react';
+import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu, ShieldAlert, Play } from 'lucide-react';
+import { DSP_TESTS, runAudioTest } from '../utils/audioTortureRunner';
 
 /**
  * AudioDiagnosticsPanel
@@ -37,6 +38,30 @@ export function AudioDiagnosticsPanel({
 
   const vectorCanvasRef = useRef(null);
   const [vectorMetrics, setVectorMetrics] = useState({ correlation: 0, width: 0, phaseRisk: 'LOW' });
+
+  const [testResults, setTestResults] = useState(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testStatus, setTestStatus] = useState('');
+
+  const handleRunTests = async () => {
+    setIsTesting(true);
+    setTestStatus('Inicializando testes...');
+    const results = [];
+    
+    for (const test of DSP_TESTS) {
+      setTestStatus(`Testando: ${test.name}`);
+      try {
+        const res = await runAudioTest(test, setTestStatus);
+        results.push(res);
+      } catch (err) {
+        results.push({ name: test.name, result: "ERROR", error: String(err) });
+      }
+    }
+    
+    setTestResults(results);
+    setIsTesting(false);
+    setTestStatus('');
+  };
 
   // ---- Inspect all nodes ------------------------------------------------
   useEffect(() => {
@@ -596,6 +621,51 @@ export function AudioDiagnosticsPanel({
                   </motion.div>
                 ))}
               </div>
+            </div>
+
+            {/* DSP Torture Test */}
+            <div className="mt-4 pt-4 border-t border-outline-variant/20">
+              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-3 flex items-center gap-1">
+                <ShieldAlert size={10} /> DSP Regression Test Suite
+              </p>
+              
+              <button 
+                onClick={handleRunTests} 
+                disabled={isTesting}
+                className="w-full flex items-center justify-center gap-2 bg-error/10 hover:bg-error/20 text-error font-bold py-3 rounded-xl transition-colors mb-4"
+              >
+                {isTesting ? <Activity size={18} className="animate-spin" /> : <Play size={18} />}
+                {isTesting ? testStatus : 'Rodar DSP Torture Tests'}
+              </button>
+
+              {testResults && (
+                <div className="space-y-2">
+                  <div className="flex gap-2 text-xs font-bold uppercase mb-2">
+                    <span className="text-green-400">PASS: {testResults.filter(r => r.result === 'PASS').length}</span>
+                    <span className="text-yellow-400">WARN: {testResults.filter(r => r.result === 'WARN').length}</span>
+                    <span className="text-error">FAIL: {testResults.filter(r => r.result === 'FAIL' || r.result === 'ERROR').length}</span>
+                  </div>
+                  {testResults.map((res, i) => (
+                    <div key={i} className={`p-3 rounded-lg border ${res.result === 'PASS' ? 'border-green-500/20 bg-green-500/5' : res.result === 'WARN' ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-error/20 bg-error/5'}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-sm text-on-surface">{res.name}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm ${res.result === 'PASS' ? 'bg-green-500/20 text-green-400' : res.result === 'WARN' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-error/20 text-error'}`}>{res.result}</span>
+                      </div>
+                      {res.failures && res.failures.length > 0 && (
+                        <ul className="text-xs text-error list-disc list-inside">
+                          {res.failures.map((f, j) => <li key={j}>{f}</li>)}
+                        </ul>
+                      )}
+                      {res.warnings && res.warnings.length > 0 && (
+                        <ul className="text-xs text-yellow-400 list-disc list-inside">
+                          {res.warnings.map((w, j) => <li key={j}>{w}</li>)}
+                        </ul>
+                      )}
+                      {res.error && <p className="text-xs text-error">{res.error}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Test Signal Guide */}
