@@ -381,12 +381,25 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const ROOM_PRESETS = {
     "Estúdio": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70, wetHpf: 150, wetLpf: 10000 },
+    "Pequena": { preDelayMs: 6, rt60: 0.8, wetMix: 0.10, wetWidth: 0.70, wetHpf: 150, wetLpf: 10000 },
     "Club": { preDelayMs: 12, rt60: 1.2, wetMix: 0.11, wetWidth: 0.80, wetHpf: 120, wetLpf: 8000 },
     "Hall": { preDelayMs: 18, rt60: 2.2, wetMix: 0.12, wetWidth: 0.80, wetHpf: 150, wetLpf: 10000 },
-    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90, wetHpf: 180, wetLpf: 12000 },
     "Concerto": { preDelayMs: 18, rt60: 3.5, wetMix: 0.15, wetWidth: 0.85, wetHpf: 120, wetLpf: 10000 },
+    "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90, wetHpf: 180, wetLpf: 12000 },
+    "Estádio": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 },
     "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65, wetHpf: 200, wetLpf: 6000 },
-    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 }
+    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 },
+    "Vastidão": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65, wetHpf: 200, wetLpf: 6000 },
+    
+    // Extreme IRs (Sound Design / Experimental)
+    "Geleira": { preDelayMs: 30, rt60: 4.0, wetMix: 0.10, wetWidth: 0.90, wetHpf: 150, wetLpf: 10000, isExtreme: true },
+    "Praia": { preDelayMs: 15, rt60: 1.5, wetMix: 0.08, wetWidth: 0.75, wetHpf: 200, wetLpf: 8000, isExtreme: true },
+    "Tubo": { preDelayMs: 5, rt60: 2.5, wetMix: 0.05, wetWidth: 0.50, wetHpf: 250, wetLpf: 6000, isExtreme: true },
+    "Squash": { preDelayMs: 0, rt60: 1.2, wetMix: 0.06, wetWidth: 0.80, wetHpf: 180, wetLpf: 9000, isExtreme: true },
+    "Túnel": { preDelayMs: 10, rt60: 4.5, wetMix: 0.06, wetWidth: 0.85, wetHpf: 220, wetLpf: 7000, isExtreme: true },
+    "Concreto": { preDelayMs: 8, rt60: 1.8, wetMix: 0.08, wetWidth: 0.80, wetHpf: 150, wetLpf: 11000, isExtreme: true },
+    "Tanque": { preDelayMs: 2, rt60: 3.5, wetMix: 0.04, wetWidth: 0.70, wetHpf: 250, wetLpf: 8000, isExtreme: true },
+    "Masmorra": { preDelayMs: 20, rt60: 2.5, wetMix: 0.06, wetWidth: 0.75, wetHpf: 200, wetLpf: 6000, isExtreme: true }
   };
 
   const ROOM_MATERIALS = {
@@ -403,7 +416,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     let currentPreset = ROOM_PRESETS[spatialMode] || ROOM_PRESETS["Estúdio"];
     let currentMat = ROOM_MATERIALS[roomMaterial] || ROOM_MATERIALS["Madeira"];
     
-    // Atualiza o slider se o preset tiver mudado a sala
+    // Se mudou de sala, reseta para o wetMix nativo dela
     if (reverbMix === 0.0 && currentPreset.wetMix > 0) {
       setReverbMix(currentPreset.wetMix);
     }
@@ -426,9 +439,19 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       wetHighEqRef.current.gain.setTargetAtTime(currentMat.hfDampingDb, audioContextRef.current.currentTime, 0.1);
     }
 
+    // Safeguard de Wet Mix para Espaços Experimentais (Impede de passar do limite do preset e destruir a música)
+    let finalWetMix = reverbMix * (currentMat.wetMixMult || 1.0);
+    if (currentPreset.isExtreme) {
+      // Se for IR extremo, impõe teto duro para que fader máximo do usuário não passe do limite seguro.
+      // O wetMix configurado em ROOM_PRESETS já é o ideal recomendado.
+      // Se reverbMix do slider for 1.0, ele só chega no limite máximo recomendado (ex: 0.08)
+      finalWetMix = reverbMix * currentPreset.wetMix * 2.0; 
+      finalWetMix = Math.min(finalWetMix, currentPreset.wetMix * 1.5); // Hard cap em 150% do recomendado
+    }
+
     if (dryGainRef.current && dryGainRef.current.port) {
       dryGainRef.current.port.postMessage({ 
-         wetMix: reverbMix * (currentMat.wetMixMult || 1.0), 
+         wetMix: finalWetMix, 
          preset: spatialMode,
          material: roomMaterial,
          preDelayMs: currentPreset.preDelayMs,
@@ -436,23 +459,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          wetWidth: currentPreset.wetWidth * currentMat.wetWidth,
          active: true
       });
-      
-      // logToCMD("DSP-RoomMaterial", JSON.stringify({
-      //    type: "telemetry",
-      //    name: "RoomMaterial",
-      //    roomPreset: spatialMode,
-      //    material: roomMaterial,
-      //    hfDampingDb: currentMat.hfDampingDb.toFixed(1),
-      //    midDampingDb: currentMat.midDampingDb.toFixed(1),
-      //    wetWidth: (currentPreset.wetWidth * currentMat.wetWidth).toFixed(2),
-      //    applied: true
-      // }), "info");
-
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
       // Fallback nativo
-      const fallbackWet = reverbMix * (currentMat.wetMixMult || 1.0);
-      dryGainRef.current.gain.setTargetAtTime(1.0 - fallbackWet, audioContextRef.current.currentTime, 0.1);
-      wetGainRef.current.gain.setTargetAtTime(fallbackWet, audioContextRef.current.currentTime, 0.1);
+      dryGainRef.current.gain.setTargetAtTime(1.0 - finalWetMix, audioContextRef.current.currentTime, 0.1);
+      wetGainRef.current.gain.setTargetAtTime(finalWetMix, audioContextRef.current.currentTime, 0.1);
     }
   }, [reverbMix, spatialMode, roomMaterial]);
 

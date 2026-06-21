@@ -26,10 +26,8 @@ const SOUND_PRESETS_DATA = [
   { name: 'Voz Clara', desc: 'Presenca vocal destacada.', key: 'Vocal' }
 ];
 
-const AMBIENTES = [
-  'Pequena', 'Club', 'Concerto', 'Estádio', 'Vastidão', 'Catedral',
-  'Geleira', 'Praia', 'Tubo', 'Squash', 'Túnel', 'Concreto', 'Tanque', 'Masmorra'
-];
+const AMBIENTES_PADRAO = ['Pequena', 'Club', 'Concerto', 'Catedral', 'Estádio', 'Vastidão'];
+const AMBIENTES_IR = ['Geleira', 'Praia', 'Tubo', 'Squash', 'Túnel', 'Concreto', 'Tanque', 'Masmorra'];
 const MATERIAIS = ['Madeira', 'Concreto', 'Vidro', 'Tecido', 'Pedra', 'Metal', 'Carpete'];
 const GENEROS = ['Rock', 'Jazz', 'Ambient', 'Orchestral', 'EDM'];
 const MOTION_MODES = ['Parado', 'Elipse', 'Figura 8', 'Espiral', 'Vertical', 'Caos', 'Reativo'];
@@ -541,14 +539,28 @@ export function EqualizerModal({
                   )}
                 </div>
 
-                <div>
-                  <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">AMBIENTES ESPACIAIS</h3>
-                  <div className="flex flex-wrap gap-3">
-                    {AMBIENTES.map((amb) => (
-                      <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
-                        {amb}
-                      </button>
-                    ))}
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">AMBIENTES PADRÃO</h3>
+                    <div className="flex flex-wrap gap-3">
+                      {AMBIENTES_PADRAO.map((amb) => (
+                        <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
+                          {amb}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-2">IR SPACES / EXPERIMENTAL</h3>
+                    <p className="text-[10px] text-[var(--md-sys-color-error)] mb-3 opacity-80 font-bold">Aviso: Modo experimental. Estes ambientes possuem assinaturas acústicas extremas.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {AMBIENTES_IR.map((amb) => (
+                        <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-4 py-1.5 rounded-full border text-[11px] font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-error)] text-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface-variant)]'}`}>
+                          {amb}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
