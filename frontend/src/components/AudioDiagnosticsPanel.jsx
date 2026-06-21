@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu, ShieldAlert, Play } from 'lucide-react';
-import { DSP_TESTS, runAudioTest } from '../utils/audioTortureRunner';
+import { TEST_SUITES, runAudioTest } from '../utils/audioTortureRunner';
 
 /**
  * AudioDiagnosticsPanel
@@ -43,12 +43,13 @@ export function AudioDiagnosticsPanel({
   const [isTesting, setIsTesting] = useState(false);
   const [testStatus, setTestStatus] = useState('');
 
-  const handleRunTests = async () => {
+  const handleRunTests = async (suiteKey) => {
     setIsTesting(true);
     setTestStatus('Inicializando testes...');
     const results = [];
+    const testsToRun = TEST_SUITES[suiteKey];
     
-    for (const test of DSP_TESTS) {
+    for (const test of testsToRun) {
       setTestStatus(`Testando: ${test.name}`);
       try {
         const res = await runAudioTest(test, setTestStatus);
@@ -629,16 +630,37 @@ export function AudioDiagnosticsPanel({
                 <ShieldAlert size={10} /> DSP Regression Test Suite
               </p>
               
-              <button 
-                onClick={handleRunTests} 
-                disabled={isTesting}
-                className="w-full flex items-center justify-center gap-2 bg-error/10 hover:bg-error/20 text-error font-bold py-3 rounded-xl transition-colors mb-4"
-              >
-                {isTesting ? <Activity size={18} className="animate-spin" /> : <Play size={18} />}
-                {isTesting ? testStatus : 'Rodar DSP Torture Tests'}
-              </button>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <button 
+                  onClick={() => handleRunTests('QUICK')} 
+                  disabled={isTesting}
+                  className="flex items-center justify-center gap-1 bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-bold py-2 rounded-xl transition-colors text-[10px] uppercase"
+                >
+                  <Play size={12} /> Quick
+                </button>
+                <button 
+                  onClick={() => handleRunTests('FULL')} 
+                  disabled={isTesting}
+                  className="flex items-center justify-center gap-1 bg-primary/10 hover:bg-primary/20 text-primary font-bold py-2 rounded-xl transition-colors text-[10px] uppercase"
+                >
+                  <Play size={12} /> Full
+                </button>
+                <button 
+                  onClick={() => handleRunTests('TORTURE')} 
+                  disabled={isTesting}
+                  className="flex items-center justify-center gap-1 bg-error/10 hover:bg-error/20 text-error font-bold py-2 rounded-xl transition-colors text-[10px] uppercase"
+                >
+                  <Activity size={12} /> Torture
+                </button>
+              </div>
 
-              {testResults && (
+              {isTesting && (
+                <div className="text-center py-2 text-xs font-bold text-primary animate-pulse">
+                  {testStatus}
+                </div>
+              )}
+
+              {testResults && !isTesting && (
                 <div className="space-y-2">
                   <div className="flex gap-2 text-xs font-bold uppercase mb-2">
                     <span className="text-green-400">PASS: {testResults.filter(r => r.result === 'PASS').length}</span>
@@ -647,21 +669,34 @@ export function AudioDiagnosticsPanel({
                   </div>
                   {testResults.map((res, i) => (
                     <div key={i} className={`p-3 rounded-lg border ${res.result === 'PASS' ? 'border-green-500/20 bg-green-500/5' : res.result === 'WARN' ? 'border-yellow-500/20 bg-yellow-500/5' : 'border-error/20 bg-error/5'}`}>
-                      <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center justify-between mb-2">
                         <span className="font-bold text-sm text-on-surface">{res.name}</span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-sm ${res.result === 'PASS' ? 'bg-green-500/20 text-green-400' : res.result === 'WARN' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-error/20 text-error'}`}>{res.result}</span>
                       </div>
+                      
+                      {/* Detailed Metrics */}
+                      {res.metrics && (
+                        <div className="grid grid-cols-3 gap-1 mb-2 text-[10px] font-mono">
+                          <div><span className="opacity-60">Peak:</span> {res.metrics.peakDb?.toFixed(1)}dB</div>
+                          <div><span className="opacity-60">Clips:</span> {res.metrics.clipCount}</div>
+                          <div><span className="opacity-60">Corr:</span> {res.metrics.correlation > 0 ? '+' : ''}{res.metrics.correlation?.toFixed(2)}</div>
+                          <div><span className="opacity-60">Width:</span> {res.metrics.widthPercent?.toFixed(0)}%</div>
+                          <div><span className="opacity-60">LimitGR:</span> {res.metrics.maxLimiterGR?.toFixed(1)}dB</div>
+                          <div><span className="opacity-60">NaN:</span> {res.metrics.nanDetected ? 'true' : 'false'}</div>
+                        </div>
+                      )}
+
                       {res.failures && res.failures.length > 0 && (
-                        <ul className="text-xs text-error list-disc list-inside">
+                        <ul className="text-xs text-error list-disc list-inside mt-1">
                           {res.failures.map((f, j) => <li key={j}>{f}</li>)}
                         </ul>
                       )}
                       {res.warnings && res.warnings.length > 0 && (
-                        <ul className="text-xs text-yellow-400 list-disc list-inside">
+                        <ul className="text-xs text-yellow-400 list-disc list-inside mt-1">
                           {res.warnings.map((w, j) => <li key={j}>{w}</li>)}
                         </ul>
                       )}
-                      {res.error && <p className="text-xs text-error">{res.error}</p>}
+                      {res.error && <p className="text-xs text-error mt-1">{res.error}</p>}
                     </div>
                   ))}
                 </div>
