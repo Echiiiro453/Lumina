@@ -236,8 +236,7 @@ export function AudioDiagnosticsPanel({
 
       ctx.beginPath();
       for (let i = 0; i < numPoints; i++) {
-        // Multiply magnitude responses (linear gain)
-        const totalMag = magHpf[i] * magLpf[i] * magMid[i] * magHigh[i];
+        const totalMag = Math.max(magHpf[i] * magLpf[i] * magMid[i] * magHigh[i], 1e-6);
         const db = 20 * Math.log10(totalMag);
         
         // Map -30dB to +10dB into canvas height
@@ -261,10 +260,41 @@ export function AudioDiagnosticsPanel({
       ctx.fillStyle = grad;
       ctx.fill();
 
-      // Draw line
+      // Draw Grid Lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '9px monospace';
+      ctx.lineWidth = 1;
+      
+      // 0 dB Line
+      const y0dB = H - ((0 - (-30)) / 40) * H;
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(0, y0dB);
+      ctx.lineTo(W, y0dB);
+      ctx.stroke();
+      ctx.fillText('0dB', 5, y0dB - 4);
+      
+      // Vertical frequency markers
+      const markers = [100, 1000, 10000];
+      const labels = ['100Hz', '1kHz', '10kHz'];
+      markers.forEach((freq, idx) => {
+        // Find x coordinate using the inverse of logarithmic mapping:
+        // freq = minFreq * (maxFreq/minFreq)^(x / (W - 1))
+        // Math.log(freq / minFreq) / Math.log(maxFreq / minFreq) = x / (W - 1)
+        const xFreq = (Math.log(freq / 20) / Math.log(20000 / 20)) * (W - 1);
+        ctx.beginPath();
+        ctx.moveTo(xFreq, 0);
+        ctx.lineTo(xFreq, H);
+        ctx.stroke();
+        ctx.fillText(labels[idx], xFreq + 4, H - 5);
+      });
+      ctx.setLineDash([]); // reset dash
+
+      // Draw curve line
       ctx.beginPath();
       for (let i = 0; i < numPoints; i++) {
-        const totalMag = magHpf[i] * magLpf[i] * magMid[i] * magHigh[i];
+        const totalMag = Math.max(magHpf[i] * magLpf[i] * magMid[i] * magHigh[i], 1e-6);
         const db = 20 * Math.log10(totalMag);
         let y = H - ((db + 30) / 40) * H;
         y = Math.max(0, Math.min(H, y));
@@ -274,6 +304,17 @@ export function AudioDiagnosticsPanel({
       ctx.strokeStyle = '#8b5cf6';
       ctx.lineWidth = 2;
       ctx.stroke();
+
+      // Draw text overlay with current parameters
+      const lpfVal = lpf.frequency?.value || 0;
+      const hpfVal = hpf.frequency?.value || 0;
+      const hfDb = high.gain?.value || 0;
+      const midDb = mid.gain?.value || 0;
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.font = 'bold 10px monospace';
+      const text = `HPF: ${Math.round(hpfVal)}Hz | LPF: ${(lpfVal/1000).toFixed(1)}kHz | Mid: ${midDb.toFixed(1)}dB | HF: ${hfDb.toFixed(1)}dB`;
+      ctx.fillText(text, W - ctx.measureText(text).width - 10, 15);
 
       raf = requestAnimationFrame(drawCurve);
     };
