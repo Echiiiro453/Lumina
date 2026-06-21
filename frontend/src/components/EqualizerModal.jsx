@@ -26,7 +26,10 @@ const SOUND_PRESETS_DATA = [
   { name: 'Voz Clara', desc: 'Presenca vocal destacada.', key: 'Vocal' }
 ];
 
-const AMBIENTES = ['Estúdio', 'Club', 'Hall', 'Catedral', 'Cinema', 'Cave'];
+const AMBIENTES = [
+  'Pequena', 'Club', 'Concerto', 'Estádio', 'Vastidão', 'Catedral',
+  'Geleira', 'Praia', 'Tubo', 'Squash', 'Túnel', 'Concreto', 'Tanque', 'Masmorra'
+];
 const MATERIAIS = ['Madeira', 'Concreto', 'Vidro', 'Tecido', 'Pedra', 'Metal', 'Carpete'];
 const GENEROS = ['Rock', 'Jazz', 'Ambient', 'Orchestral', 'EDM'];
 const MOTION_MODES = ['Parado', 'Elipse', 'Figura 8', 'Espiral', 'Vertical', 'Caos', 'Reativo'];

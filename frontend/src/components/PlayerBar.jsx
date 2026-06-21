@@ -39,7 +39,15 @@ const loadIR = async (audioCtx, preset) => {
      'Estádio': 'stadium.wav',
      'Vastidão': 'vast_space.wav',
      'Catedral': 'cathedral.wav',
-     'Club': 'club.wav'
+     'Club': 'club.wav',
+     'Geleira': 'geleira.wav',
+     'Praia': 'praia.wav',
+     'Tubo': 'tubo.wav',
+     'Squash': 'squash.wav',
+     'Túnel': 'tunel.wav',
+     'Concreto': 'concreto.wav',
+     'Tanque': 'tanque.wav',
+     'Masmorra': 'masmorra.wav'
   };
   const filename = fileMap[preset];
   if (!filename) return createReverbIR(audioCtx, 3.5, 2.5);
@@ -59,6 +67,14 @@ const loadIR = async (audioCtx, preset) => {
       case 'Concerto': duration = 2.5; decay = 3.0; break;
       case 'Estádio': duration = 3.5; decay = 2.0; break;
       case 'Vastidão': duration = 6.0; decay = 1.0; break;
+      case 'Geleira': duration = 4.0; decay = 2.0; break;
+      case 'Praia': duration = 1.0; decay = 4.0; break;
+      case 'Tubo': duration = 3.0; decay = 3.5; break;
+      case 'Squash': duration = 1.5; decay = 3.0; break;
+      case 'Túnel': duration = 5.0; decay = 1.5; break;
+      case 'Concreto': duration = 2.0; decay = 2.0; break;
+      case 'Tanque': duration = 4.0; decay = 1.8; break;
+      case 'Masmorra': duration = 3.5; decay = 2.2; break;
     }
     return createReverbIR(audioCtx, duration, decay);
   }
