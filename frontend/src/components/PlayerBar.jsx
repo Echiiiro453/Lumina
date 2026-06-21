@@ -1189,7 +1189,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
       deesserNode.port.postMessage({ active: enableDeesser });
       deesserNode.port.onmessage = (e) => {
-        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deesserRef.current = deesserNode;
       currentNode.connect(deesserNode);
@@ -1199,7 +1199,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
       deharshNode.port.postMessage({ active: enableDeharsh });
       deharshNode.port.onmessage = (e) => {
-        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deharshRef.current = deharshNode;
       currentNode.connect(deharshNode);
@@ -1213,16 +1213,16 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       currentNode = saturationNode;
 
       saturationNode.port.onmessage = (e) => {
-        if (e.data.type === 'telemetry') {
-          logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
-        }
+        // if (e.data.type === 'telemetry') {
+        //   logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        // }
       };
 
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
       submonoNode.port.onmessage = (e) => {
-        if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+        // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       submonoRef.current = submonoNode;
       currentNode.connect(submonoNode);
@@ -1265,7 +1265,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const depthNode = new AudioWorkletNode(audioCtx, 'depth');
         depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
         depthNode.port.onmessage = (e) => {
-          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+          // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         depthRef.current = depthNode;
         exciterNode.connect(depthNode);
@@ -1372,7 +1372,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
         masteringNode.port.postMessage({ enablePhaseRotation });
         masteringNode.port.onmessage = (e) => {
-          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+          // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         masteringRef.current = masteringNode;
         finalNode.connect(masteringNode);
