@@ -72,17 +72,34 @@
   - [ ] Medidor de uso de banda
   - [ ] Throttling opcional
 
-## 🎵 Audio Features
+## 🎵 Advanced DSP & Audio Features (Próximas Prioridades)
 
-- [ ] **Normalizador de Volume**
-  - [ ] ReplayGain integration
-  - [ ] Análise de loudness
-  - [ ] Aplicação automática
+- [ ] **1. Headphone Correction / AutoEQ**
+  - [ ] Perfis de fone pré-calibrados para nivelar a resposta em frequência.
+  - [ ] Curvas de correção automáticas para os fones mais populares do mercado.
 
-- [ ] **Efeitos Extras**
-  - [ ] Reverb/Echo
-  - [ ] Compressor
-  - [ ] 3D Audio
+- [ ] **2. A/B Test Workflow com Loudness Igualado**
+  - [ ] Comparação real-time entre áudio Original e Processado.
+  - [ ] Compensação de Loudness para que o A/B seja honesto e focado na textura.
+
+- [ ] **3. Convolution Reverb (Impulse Response)**
+  - [ ] Implementar via `ConvolverNode` simulações de espaços reais (Igreja, Teatro, Caverna, Spring Reverb).
+  - [ ] Expandir o atual Room procedural.
+
+- [ ] **4. Stereo Vectorscope / Phase Meter**
+  - [ ] Goniometer real-time (Gráfico de Lissajous) no painel de Diagnóstico.
+  - [ ] Leitura instantânea de: Correlation, Width (%) e Risco de Fase (Phase Risk).
+
+- [ ] **5. ReplayGain / Loudness Normalize Dinâmico**
+  - [ ] Normalização pós-download com metadados (Integrar `-14 LUFS` ou `-16 LUFS`).
+  - [ ] Adequar músicas antigas/clipadas no padrão de conforto atual.
+
+- [ ] **Outras Ferramentas Profissionais na Fila**
+  - [ ] Crossfeed Avançado (Delay, LPF).
+  - [ ] Transient Shaper (Ataque/Sustain shaping).
+  - [ ] Dynamic EQ Real / Multiband Compressor.
+  - [ ] Declipper Automático para áudios do YouTube esmagados.
+  - [ ] Toggle global entre Modo **Referência** (Zero Cor) e Modo **Criativo** (Spatial, Saturação, Room).
 
 - [ ] **Detecção de BPM**
   - [ ] Librosa integration
