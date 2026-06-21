@@ -24,7 +24,7 @@ export function AudioDiagnosticsPanel({
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
   eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef, masterTelemetryRef,
-  analyserLRef, analyserRRef
+  analyserLRef, analyserRRef, stereoTelemetryRef
 }) {
   const canvasRef = useRef(null);
   const curveCanvasRef = useRef(null);
