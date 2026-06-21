@@ -57,7 +57,8 @@ export function EqualizerModal({
   enableSpectralGlue, setEnableSpectralGlue,
   spectralGlueThreshold, setSpectralGlueThreshold,
   enableStereoDepth, setEnableStereoDepth,
-  stereoDepthAmount, setStereoDepthAmount
+  stereoDepthAmount, setStereoDepthAmount,
+  enableReplayGain, setEnableReplayGain
 }) {
   const [activeTab, setActiveTab] = useState('eq');
 
@@ -357,20 +358,35 @@ export function EqualizerModal({
                       <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mt-2">Adiciona harmonicos sutis. Melhora brilho em MP3.</p>
                     </div>
 
-                    {/* Normalizacao LUFS */}
+                    {/* Normalizacao LUFS (ReplayGain) */}
                     <div>
-                      <label className="text-sm font-bold text-[var(--md-sys-color-on-surface)] mb-4 block">Normalizacao LUFS</label>
-                      <div className="flex space-x-2">
-                        {[
-                          {name: 'Suave', lufs: '-16 LUFS'}, {name: 'Streaming', lufs: '-14 LUFS'},
-                          {name: 'Radio', lufs: '-11 LUFS'}, {name: 'Loud', lufs: '-9 LUFS'}
-                        ].map(w => (
-                          <button key={w.name} onClick={() => setLufsMode(w.name)} className={`flex-1 py-2 flex flex-col items-center justify-center rounded-xl transition-all ${w.name === lufsMode ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>
-                            <span className="text-xs font-bold">{w.name}</span>
-                            <span className="text-[9px] opacity-80">{w.lufs}</span>
-                          </button>
-                        ))}
+                      <div className="flex items-center justify-between mb-4">
+                        <label className="text-sm font-bold text-[var(--md-sys-color-on-surface)] block">Loudness Leveling (ReplayGain)</label>
+                        <div className="flex items-center space-x-2">
+                           <span className="text-[10px] uppercase font-bold text-[var(--md-sys-color-on-surface-variant)]">{enableReplayGain ? 'ON' : 'OFF'}</span>
+                           <button 
+                             onClick={() => setEnableReplayGain && setEnableReplayGain(!enableReplayGain)}
+                             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enableReplayGain ? 'bg-[var(--md-sys-color-primary)]' : 'bg-[var(--md-sys-color-surface-container-highest)]'}`}
+                           >
+                             <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${enableReplayGain ? 'translate-x-5' : 'translate-x-1'}`} />
+                           </button>
+                        </div>
                       </div>
+                      
+                      {enableReplayGain && (
+                        <div className="flex space-x-2 mt-2">
+                          {[
+                            {name: 'Seguro', lufs: '-18 LUFS'}, {name: 'Normal', lufs: '-16 LUFS'},
+                            {name: 'Alto', lufs: '-14 LUFS'}, {name: 'Noite', lufs: '-20 LUFS'}
+                          ].map(w => (
+                            <button key={w.name} onClick={() => setLufsMode(w.name)} className={`flex-1 py-2 flex flex-col items-center justify-center rounded-xl transition-all ${w.name === lufsMode ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>
+                              <span className="text-xs font-bold">{w.name}</span>
+                              <span className="text-[9px] opacity-80">{w.lufs}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mt-2">Nivela o volume das faixas para evitar picos inesperados.</p>
                     </div>
                   </div>
                 </div>

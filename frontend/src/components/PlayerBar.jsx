@@ -110,6 +110,47 @@ const makeExciterCurve = (amount) => {
   return curve;
 };
 
+function analyzeTrackLoudness(audioBuffer) {
+  const EPS = 1e-12;
+  const channels = audioBuffer.numberOfChannels;
+  const length = audioBuffer.length;
+  let peak = 0;
+  let sumSquares = 0;
+  let count = 0;
+  for (let ch = 0; ch < channels; ch++) {
+    const data = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      const x = data[i];
+      peak = Math.max(peak, Math.abs(x));
+      if (Math.abs(x) > 0.0005) {
+        sumSquares += x * x;
+        count++;
+      }
+    }
+  }
+  const rms = Math.sqrt(sumSquares / Math.max(count, 1));
+  const loudnessDb = 20 * Math.log10(Math.max(rms, EPS));
+  const peakDb = 20 * Math.log10(Math.max(peak, EPS));
+  return { loudnessDb, peakDb };
+}
+
+function calculateReplayGain({
+  measuredLoudnessDb,
+  peakDb,
+  targetDb = -16.0,
+  ceilingDb = -1.0,
+  safetyMarginDb = 0.5
+}) {
+  const rawGainDb = targetDb - measuredLoudnessDb;
+  const maxGainByPeakDb = ceilingDb - peakDb - safetyMarginDb;
+  const safeGainDb = Math.min(rawGainDb, maxGainByPeakDb);
+  return {
+    rawGainDb,
+    safeGainDb,
+    peakLimited: safeGainDb < rawGainDb
+  };
+}
+
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -169,6 +210,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [lufsValue, setLufsValue] = useState(null);
 
   // --- Missing / New DSP States & Refs ---
+  const [enableReplayGain, setEnableReplayGain] = useState(true);
+  const replayGainNodeRef = useRef(null);
   const masterGainRef = useRef(null);
   const wetHpfRef = useRef(null);
   const wetLpfRef = useRef(null);
@@ -309,6 +352,83 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const openMiniPlayer = () => {
     fetch('http://localhost:8000/api/miniplayer/open', { method: 'POST' }).catch(console.error);
   };
+
+  // --- ReplayGain / Loudness Leveling Engine ---
+  useEffect(() => {
+    if (!currentSong || !currentSong.url || !enableReplayGain) {
+      if (replayGainNodeRef.current && audioContextRef.current) {
+        replayGainNodeRef.current.gain.setTargetAtTime(1.0, audioContextRef.current.currentTime, 0.5);
+      }
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    const processLoudness = async () => {
+      try {
+        logToCMD("ReplayGain", "Analisando loudness do arquivo em background...", "info");
+        
+        // Fetch background audio para análise (sem interferir no streaming do player principal)
+        const res = await fetch(currentSong.url, { signal: abortController.signal });
+        if (!res.ok) throw new Error("Falha ao baixar track para ReplayGain");
+        const arrayBuffer = await res.arrayBuffer();
+
+        // O AudioContext nativo é super rápido para decodificar
+        const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(2, 44100, 44100);
+        const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+
+        const { loudnessDb, peakDb } = analyzeTrackLoudness(audioBuffer);
+        
+        // Determina Target de acordo com lufsMode (Normal, Alto, Noite, etc)
+        let targetLufs = -16.0;
+        if (lufsMode === 'Normal') targetLufs = -16.0;
+        else if (lufsMode === 'Alto') targetLufs = -14.0;
+        else if (lufsMode === 'Noite') targetLufs = -20.0;
+        else if (lufsMode === 'Seguro') targetLufs = -18.0;
+
+        const { rawGainDb, safeGainDb, peakLimited } = calculateReplayGain({
+          measuredLoudnessDb: loudnessDb,
+          peakDb: peakDb,
+          targetDb: targetLufs,
+          ceilingDb: -1.0,
+          safetyMarginDb: 0.5
+        });
+
+        const gainMultiplier = Math.pow(10, safeGainDb / 20);
+
+        if (replayGainNodeRef.current && audioContextRef.current) {
+          replayGainNodeRef.current.gain.setTargetAtTime(gainMultiplier, audioContextRef.current.currentTime, 1.0);
+        }
+
+        logToCMD("DSP-ReplayGain", JSON.stringify({
+          type: "telemetry",
+          name: "ReplayGain",
+          track: currentSong.title,
+          targetDb: targetLufs.toFixed(1),
+          measuredLoudnessDb: loudnessDb.toFixed(1),
+          peakDb: peakDb.toFixed(1),
+          rawGainDb: rawGainDb.toFixed(1),
+          safeGainDb: safeGainDb.toFixed(1),
+          peakLimited,
+          appliedGain: gainMultiplier.toFixed(3)
+        }), "info");
+
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+           console.warn("ReplayGain Analysis Error:", e);
+           if (replayGainNodeRef.current && audioContextRef.current) {
+             replayGainNodeRef.current.gain.setTargetAtTime(1.0, audioContextRef.current.currentTime, 0.5);
+           }
+        }
+      }
+    };
+
+    processLoudness();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [currentSong, enableReplayGain, lufsMode]);
   
   const audioRef = useRef(null);
   const scrobbledRef = useRef(false);
@@ -798,6 +918,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const source = audioCtx.createGain(); // Mixer bus
       mediaSource.connect(source);
 
+      // ReplayGain / Auto-Leveling Node
+      const replayGainNode = audioCtx.createGain();
+      replayGainNodeRef.current = replayGainNode;
+      source.connect(replayGainNode);
+
       // QA Denormal Number Fix (Inject 1e-10 DC Noise Floor to prevent CPU denormal spikes)
       const ditherBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
       const ditherData = ditherBuffer.getChannelData(0);
@@ -831,7 +956,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const postNode = audioCtx.createGain();
       workletAnchorRef.current = { pre: preNode, post: postNode };
 
-      source.connect(filters[0]);
+      replayGainNode.connect(filters[0]);
       for (let i = 0; i < filters.length - 1; i++) {
         filters[i].connect(filters[i+1]);
       }
@@ -2001,6 +2126,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           spectralGlueThreshold={spectralGlueThreshold} setSpectralGlueThreshold={setSpectralGlueThreshold}
           enableStereoDepth={enableStereoDepth} setEnableStereoDepth={setEnableStereoDepth}
           stereoDepthAmount={stereoDepthAmount} setStereoDepthAmount={setStereoDepthAmount}
+          enableReplayGain={enableReplayGain} setEnableReplayGain={setEnableReplayGain}
         />
       )}
 
