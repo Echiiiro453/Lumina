@@ -386,16 +386,16 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          active: true
       });
       
-      logToCMD("DSP-RoomMaterial", JSON.stringify({
-         type: "telemetry",
-         name: "RoomMaterial",
-         roomPreset: spatialMode,
-         material: roomMaterial,
-         hfDampingDb: currentMat.hfDampingDb.toFixed(1),
-         midDampingDb: currentMat.midDampingDb.toFixed(1),
-         wetWidth: (currentPreset.wetWidth * currentMat.wetWidth).toFixed(2),
-         applied: true
-      }), "info");
+      // logToCMD("DSP-RoomMaterial", JSON.stringify({
+      //    type: "telemetry",
+      //    name: "RoomMaterial",
+      //    roomPreset: spatialMode,
+      //    material: roomMaterial,
+      //    hfDampingDb: currentMat.hfDampingDb.toFixed(1),
+      //    midDampingDb: currentMat.midDampingDb.toFixed(1),
+      //    wetWidth: (currentPreset.wetWidth * currentMat.wetWidth).toFixed(2),
+      //    applied: true
+      // }), "info");
 
     } else if (dryGainRef.current && wetGainRef.current && audioContextRef.current) {
       // Fallback nativo
@@ -885,7 +885,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
            rt60: 3.5
         });
         roomTelemetryNode.port.onmessage = (e) => {
-          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+          // se quiser debugar a sala, descomente abaixo
+          // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
       } catch (e) {
         console.warn("Room telemetry load failed", e);
@@ -1007,7 +1008,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         if (wetParam) wetParam.value = enable8D ? 0.20 : 0.0;
         
         panner8DNode.port.onmessage = (e) => {
-          if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
+          // se quiser debugar o panner, descomente abaixo
+          // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
       } catch (e) {
         console.warn("Spatial 8D load failed", e);
