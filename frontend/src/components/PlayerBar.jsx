@@ -32,6 +32,15 @@ const createReverbIR = (audioCtx, duration, decay) => {
   return impulse;
 };
 
+const measureIRRms = (buffer) => {
+  const data = buffer.getChannelData(0);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i] * data[i];
+  }
+  return Math.sqrt(sum / data.length);
+};
+
 const loadIR = async (audioCtx, preset) => {
   const fileMap = {
      'Pequena': 'room_small.wav',
@@ -50,15 +59,19 @@ const loadIR = async (audioCtx, preset) => {
      'Masmorra': 'masmorra.wav'
   };
   const filename = fileMap[preset];
-  if (!filename) return createReverbIR(audioCtx, 3.5, 2.5);
+  if (!filename) {
+    const buf = createReverbIR(audioCtx, 3.5, 2.5);
+    buf.rms = measureIRRms(buf);
+    return buf;
+  }
   
+  let buffer;
   try {
     const response = await fetch(`/irs/${filename}`);
     if (!response.ok) throw new Error("IR file not found");
     const arrayBuffer = await response.arrayBuffer();
-    return await audioCtx.decodeAudioData(arrayBuffer);
+    buffer = await audioCtx.decodeAudioData(arrayBuffer);
   } catch (e) {
-    // Fallback Procedural caso o arquivo WAV falhe
     let duration = 3.5, decay = 2.5;
     switch (preset) {
       case 'Pequena': duration = 0.8; decay = 5.0; break;
@@ -76,8 +89,10 @@ const loadIR = async (audioCtx, preset) => {
       case 'Tanque': duration = 4.0; decay = 1.8; break;
       case 'Masmorra': duration = 3.5; decay = 2.2; break;
     }
-    return createReverbIR(audioCtx, duration, decay);
+    buffer = createReverbIR(audioCtx, duration, decay);
   }
+  buffer.rms = measureIRRms(buffer);
+  return buffer;
 };
 
 
@@ -159,6 +174,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const wetLpfRef = useRef(null);
   const wetMidEqRef = useRef(null);
   const wetHighEqRef = useRef(null);
+  const currentIrRmsRef = useRef(0.15); // baseline safe rms
   const [enable8D, setEnable8D] = useState(false);
   const [motionMode, setMotionMode] = useState('Elipse');
   const [motionSpeed, setMotionSpeed] = useState(0.5);
@@ -441,12 +457,26 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
     // Safeguard de Wet Mix para Espaços Experimentais (Impede de passar do limite do preset e destruir a música)
     let finalWetMix = reverbMix * (currentMat.wetMixMult || 1.0);
+    let energyPenalty = 1.0;
+    
+    // Proteção Ativa: Se a IR carregada for matematicamente muito quente (RMS alto), penalizamos o ganho máximo dela
+    const irRms = currentIrRmsRef.current;
+    if (irRms > 0.20) energyPenalty = 0.50;
+    else if (irRms > 0.12) energyPenalty = 0.70;
+    else if (irRms > 0.08) energyPenalty = 0.85;
+
+    let protectionStr = "NONE";
+    let maxWetAllowed = 1.0;
+
     if (currentPreset.isExtreme) {
       // Se for IR extremo, impõe teto duro para que fader máximo do usuário não passe do limite seguro.
-      // O wetMix configurado em ROOM_PRESETS já é o ideal recomendado.
-      // Se reverbMix do slider for 1.0, ele só chega no limite máximo recomendado (ex: 0.08)
+      maxWetAllowed = currentPreset.wetMix * 1.5; // Hard cap em 150% do recomendado
       finalWetMix = reverbMix * currentPreset.wetMix * 2.0; 
-      finalWetMix = Math.min(finalWetMix, currentPreset.wetMix * 1.5); // Hard cap em 150% do recomendado
+      finalWetMix = Math.min(finalWetMix, maxWetAllowed) * energyPenalty; 
+      protectionStr = energyPenalty < 1.0 ? "EXTREME_IR_CAP + ENERGY_PENALTY" : "EXTREME_IR_CAP";
+    } else {
+      finalWetMix = finalWetMix * energyPenalty;
+      if (energyPenalty < 1.0) protectionStr = "ENERGY_PENALTY";
     }
 
     if (dryGainRef.current && dryGainRef.current.port) {
@@ -464,6 +494,22 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       dryGainRef.current.gain.setTargetAtTime(1.0 - finalWetMix, audioContextRef.current.currentTime, 0.1);
       wetGainRef.current.gain.setTargetAtTime(finalWetMix, audioContextRef.current.currentTime, 0.1);
     }
+
+    // Telemetria detalhada para ajudar no debugging de Convolution
+    logToCMD("DSP-IRSpace", JSON.stringify({
+       type: "telemetry",
+       name: "IRSpace",
+       preset: spatialMode,
+       isExtreme: !!currentPreset.isExtreme,
+       userWet: reverbMix.toFixed(2),
+       effectiveWet: finalWetMix.toFixed(3),
+       wetCap: maxWetAllowed.toFixed(3),
+       irRms: irRms.toFixed(3),
+       energyPenalty: energyPenalty.toFixed(2),
+       protection: protectionStr,
+       clipRisk: finalWetMix > 0.20 ? "HIGH" : (finalWetMix > 0.10 ? "MEDIUM" : "LOW")
+    }), "info");
+
   }, [reverbMix, spatialMode, roomMaterial]);
 
   // --- Propagate DSP parameter changes ---
@@ -727,6 +773,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
        const buffer = await loadIR(ctx, spatialMode);
        if (reverbNodeRef.current) {
           reverbNodeRef.current.buffer = buffer;
+          if (buffer && buffer.rms) {
+             currentIrRmsRef.current = buffer.rms;
+          }
        }
     };
     updateIR();
