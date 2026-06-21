@@ -150,40 +150,7 @@ export function AudioDiagnosticsPanel({
     return () => cancelAnimationFrame(rafRef.current);
   }, [isOpen, analyserRef, limiterRef]);
 
-  // ---- Scope / waveform canvas ------------------------------------------
-  useEffect(() => {
-    if (!isOpen || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx2d = canvas.getContext('2d');
-    let raf;
-
-    const draw = () => {
-      const analyser = analyserRef?.current;
-      if (!analyser) {
-        raf = requestAnimationFrame(draw);
-        return;
-      }
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteFrequencyData(data);
-      const W = canvas.width, H = canvas.height;
-      ctx2d.clearRect(0, 0, W, H);
-      ctx2d.fillStyle = '#0a0a0a';
-      ctx2d.fillRect(0, 0, W, H);
-
-      const barW = (W / data.length) * 2.5;
-      let x = 0;
-      for (let i = 0; i < data.length; i++) {
-        const h = (data[i] / 255) * H;
-        const hue = 200 + (data[i] / 255) * 80;
-        ctx2d.fillStyle = `hsl(${hue}, 80%, 55%)`;
-        ctx2d.fillRect(x, H - h, barW, h);
-        x += barW + 1;
-      }
-      raf = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(raf);
-  }, [isOpen, analyserRef]);
+  // Canvas unificado (Espectro + Curva)
 
   // ---- Damping Curve Visualizer ------------------------------------------
   useEffect(() => {
@@ -205,8 +172,28 @@ export function AudioDiagnosticsPanel({
 
       const W = canvas.width, H = canvas.height;
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = '#111';
+      ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, W, H);
+
+      // 1. Draw Real-time Spectrum Analyzer
+      const analyser = analyserRef?.current;
+      if (analyser) {
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+        const barW = (W / data.length) * 2.5;
+        let x = 0;
+        for (let i = 0; i < data.length; i++) {
+          // Map index to logarithmic frequency scale to match the Damping Curve
+          const freq = analyser.context.sampleRate / 2 * (i / data.length);
+          if (freq >= 20 && freq <= 20000) {
+             const xLog = (Math.log(freq / 20) / Math.log(20000 / 20)) * (W - 1);
+             const h = (data[i] / 255) * H;
+             const hue = 200 + (data[i] / 255) * 80;
+             ctx.fillStyle = `hsla(${hue}, 80%, 55%, 0.6)`;
+             ctx.fillRect(xLog, H - h, Math.max(1, barW), h);
+          }
+        }
+      }
 
       const numPoints = W;
       const freqArray = new Float32Array(numPoints);
@@ -321,7 +308,7 @@ export function AudioDiagnosticsPanel({
 
     drawCurve();
     return () => cancelAnimationFrame(raf);
-  }, [isOpen, wetHpfRef, wetLpfRef, wetMidEqRef, wetHighEqRef]);
+  }, [isOpen, wetHpfRef, wetLpfRef, wetMidEqRef, wetHighEqRef, analyserRef]);
 
   if (!isOpen) return null;
 
@@ -362,25 +349,15 @@ export function AudioDiagnosticsPanel({
           </div>
 
           <div className="p-6 space-y-6">
-            {/* Spectrum Analyzer */}
+            {/* Spectrum & Damping Curve */}
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2 flex items-center gap-1">
-                <Radio size={10} /> Spectrum Analyser (Tempo Real)
-              </p>
-              <canvas
-                ref={canvasRef}
-                width={640}
-                height={100}
-                className="w-full rounded-xl border border-outline-variant/20 mb-4"
-              />
-              
-              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2 flex items-center gap-1">
-                <Radio size={10} /> Room Damping Curve (Resposta em Frequência)
+                <Radio size={10} /> Real-time Spectrum & Room Damping Curve
               </p>
               <canvas
                 ref={curveCanvasRef}
                 width={640}
-                height={100}
+                height={140}
                 className="w-full rounded-xl border border-outline-variant/20"
               />
             </div>
