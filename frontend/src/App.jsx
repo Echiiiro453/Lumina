@@ -220,7 +220,6 @@ function App() {
 
   // Playlist Manager
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
-  const [showBatchModal, setShowBatchModal] = useState(false);
   const [playlistVideos, setPlaylistVideos] = useState([]);
   const [selectedVideos, setSelectedVideos] = useState(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
@@ -356,7 +355,7 @@ function App() {
   // ===== API CONFIG =====
   // Single Port 8000 (Backend handles concurrency via Task Queue)
   const API_URL = `${window.location.protocol}//${window.location.hostname}:8000`;
-  const getApiUrl = (endpoint = '') => `${API_URL}${endpoint}`;
+  const getApiUrl = React.useCallback((endpoint = '') => `${API_URL}${endpoint}`, [API_URL]);
 
   // Update Checker
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -388,6 +387,50 @@ function App() {
   // GLOBAL DOWNLOADS STATE (WebSocket Strategy)
   const [globalJobs, setGlobalJobs] = useState({});
   const [currentJobId, setCurrentJobId] = useState(null);
+  const [nextDownloadInput, setNextDownloadInput] = useState('');
+  const [consecutiveDownloads, setConsecutiveDownloads] = useState([]);
+  const consecutiveDownloadsRef = React.useRef([]);
+  const frozenDownloadOptionsRef = React.useRef(null);
+
+  const replaceConsecutiveDownloads = (updater) => {
+    const previous = consecutiveDownloadsRef.current;
+    const next = typeof updater === 'function' ? updater(previous) : updater;
+    consecutiveDownloadsRef.current = next;
+    setConsecutiveDownloads(next);
+  };
+
+  const submitConsecutiveDownload = async (downloadUrl) => {
+    const options = frozenDownloadOptionsRef.current;
+    if (!options) throw new Error('Configuração inicial do download não encontrada.');
+    const response = await axios.post(getApiUrl('/download'), { ...options, url: downloadUrl });
+    setProgress({ percent: 0, status: 'queued' });
+    setCurrentJobId(response.data.job_id);
+  };
+
+  const addConsecutiveDownload = () => {
+    const nextUrl = nextDownloadInput.trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(nextUrl)) {
+      addToast('Cole um link válido para adicionar ao próximo download.', 'error');
+      return;
+    }
+    replaceConsecutiveDownloads(previous => [...previous, { id: `${Date.now()}-${Math.random()}`, url: nextUrl }]);
+    setNextDownloadInput('');
+    addToast('Link adicionado em “A seguir”.', 'success');
+  };
+
+  const startNextConsecutiveDownload = (finishedWithError = false) => {
+    const [next, ...remaining] = consecutiveDownloadsRef.current;
+    if (!next) return false;
+    replaceConsecutiveDownloads(remaining);
+    setCurrentJobId(null);
+    if (finishedWithError) addToast('O download falhou; iniciando o próximo link.', 'warning');
+    else addToast('Download concluído; iniciando o próximo link.', 'success');
+    submitConsecutiveDownload(next.url).catch(error => {
+      addToast(error.response?.data?.detail || 'Falha ao iniciar o próximo download.', 'error');
+      startNextConsecutiveDownload(true);
+    });
+    return true;
+  };
 
   useEffect(() => {
     let ws;
@@ -444,6 +487,7 @@ function App() {
           });
         }
         if (job.status === 'done') {
+          if (startNextConsecutiveDownload(false)) return;
           setDownloadInfo({
             status: 'success',
             title: job.title || job.filename,
@@ -454,6 +498,7 @@ function App() {
           setStep('result');
           setCurrentJobId(null);
         } else if (job.status === 'error' || job.status === 'timeout') {
+          if (startNextConsecutiveDownload(true)) return;
           addToast(t('statusError') || 'Falha no download.', 'error');
           let errMsg = job.error || t('statusError');
           if (!isAuthenticated) {
@@ -1052,20 +1097,28 @@ function App() {
     setStep('downloading');
     setStatus(null);
     setMessage('');
+    frozenDownloadOptionsRef.current = {
+      quality,
+      mode,
+      subtitle: mode === 'video' ? subtitle : 'none',
+      playlist: false,
+      pitch: mode === 'audio' ? pitch : 0,
+      speed: mode === 'audio' ? speed : 1.0,
+      start_time: trimEnabled && startTime ? startTime : null,
+      end_time: trimEnabled && endTime ? endTime : null,
+      spatial_audio: spatialAudio,
+      video_codec: videoCodec,
+      compress_video: compressVideo,
+      organize: organizeByArtist,
+      organize_by_playlist: organizeByPlaylist,
+      sponsorblock_enabled: sponsorblockEnabled
+    };
 
     try {
       // 1. Enqueue Task (agora /download também retorna job_id imediatamente)
       const response = await axios.post(getApiUrl('/download'), {
-        url: metadata.url,
-        quality,
-        mode,
-        subtitle: mode === 'video' ? subtitle : 'none',
-        playlist: false,
-        pitch: mode === 'audio' ? pitch : 0,
-        speed: mode === 'audio' ? speed : 1.0,
-        start_time: trimEnabled && startTime ? startTime : null,
-        end_time: trimEnabled && endTime ? endTime : null,
-        spatial_audio: spatialAudio
+        ...frozenDownloadOptionsRef.current,
+        url: metadata.url
       });
 
       const { job_id } = response.data;
@@ -1966,6 +2019,23 @@ function App() {
                   <p className="text-xs text-secondary/50">
                     {progress.percent === 100 ? 'Quase lá, finalizando o arquivo...' : 'Aguarde um momento'}
                   </p>
+                  <div className="mt-6 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 text-left space-y-3">
+                    <div>
+                      <p className="text-sm font-bold text-on-surface">Baixar em seguida</p>
+                      <p className="text-xs text-on-surface-variant">O próximo link usará {frozenDownloadOptionsRef.current?.quality || quality} e as mesmas configurações deste download.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <input value={nextDownloadInput} onChange={(event) => setNextDownloadInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addConsecutiveDownload(); } }} placeholder="Cole o próximo link aqui..." className="min-w-0 flex-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-4 py-2 text-sm text-on-surface outline-none focus:border-primary" />
+                      <button onClick={addConsecutiveDownload} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary/90"><Plus size={17} /></button>
+                    </div>
+                    {consecutiveDownloads.length > 0 && <div className="space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-primary">A seguir ({consecutiveDownloads.length})</p>
+                      {consecutiveDownloads.map((item, index) => <div key={item.id} className="flex items-center gap-2 rounded-xl bg-surface-container px-3 py-2 text-xs text-on-surface-variant">
+                        <span className="font-mono text-primary">{index + 1}</span><span className="min-w-0 flex-1 truncate" title={item.url}>{item.url}</span>
+                        <button onClick={() => replaceConsecutiveDownloads(previous => previous.filter(entry => entry.id !== item.id))} className="rounded-full p-1 hover:bg-error/10 hover:text-error" title="Remover"><X size={14} /></button>
+                      </div>)}
+                    </div>}
+                  </div>
                 </div>
               )}
 
