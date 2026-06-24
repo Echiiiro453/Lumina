@@ -10,6 +10,7 @@ backend/__pycache__/
 # Distribution and build
 dist/
 build/
+backend/static/
 *.spec
 
 # Media files (don't upload user downloads)

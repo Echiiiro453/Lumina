@@ -14,7 +14,6 @@ export function TagEditorModal({ isOpen, onClose, song, getApiUrl, onSaved }) {
   const [isCustomSearch, setIsCustomSearch] = useState(false);
   const [customQuery, setCustomQuery] = useState('');
   const [status, setStatus] = useState(null);
-  const [outputPath, setOutputPath] = useState(null); // { type: 'success'|'error', msg }
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -44,7 +43,7 @@ export function TagEditorModal({ isOpen, onClose, song, getApiUrl, onSaved }) {
         setCoverBase64(d.cover_base64);
         setCoverPreview(`data:image/jpeg;base64,${d.cover_base64}`);
       }
-    } catch (e) {
+    } catch {
       setStatus({ type: 'error', msg: 'Falha ao carregar tags do arquivo.' });
     } finally {
       setLoading(false);
@@ -104,13 +103,6 @@ export function TagEditorModal({ isOpen, onClose, song, getApiUrl, onSaved }) {
     }
   };
 
-    const handleOpenExternal = async () => {
-    if (!outputPath) return;
-    try {
-      await axios.post(getApiUrl(`/api/open_external`), { file_path: outputPath });
-    } catch(e) { console.error(e); }
-  };
-
   const handleSave = async () => {
     setSaving(true);
     setStatus(null);
@@ -127,7 +119,7 @@ export function TagEditorModal({ isOpen, onClose, song, getApiUrl, onSaved }) {
       } else {
         setStatus({ type: 'error', msg: res.data.error || 'Falha ao salvar.' });
       }
-    } catch (e) {
+    } catch {
       setStatus({ type: 'error', msg: 'Erro ao salvar tags.' });
     } finally {
       setSaving(false);

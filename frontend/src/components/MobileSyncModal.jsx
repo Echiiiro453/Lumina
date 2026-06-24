@@ -18,7 +18,9 @@ export default function MobileSyncModal({ isOpen, onClose }) {
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+
+    const timeoutId = setTimeout(() => {
       setLoading(true);
       setError(null);
       
@@ -36,7 +38,9 @@ export default function MobileSyncModal({ isOpen, onClose }) {
         setError('Não foi possível obter o IP ou token. Verifique se o servidor está em execução.');
         setLoading(false);
       });
-    }
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
   }, [isOpen]);
 
   useEffect(() => {

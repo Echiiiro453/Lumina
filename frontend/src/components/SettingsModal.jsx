@@ -34,7 +34,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     try {
       await axios.post(`${apiUrl}/api/settings/telegram`, { token: telegramToken, chat_id: telegramChatId, enabled: telegramEnabled });
       // saved silently or toast
-    } catch(e) { }
+    } catch {
+      // Telegram settings are best-effort.
+    }
   };
 
   const handleTestTelegram = async () => {
@@ -102,7 +104,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     try {
       const res = await axios.get(`${apiUrl}/api/db/sync`);
       setSyncResult(res.data);
-    } catch (e) {
+    } catch {
       setSyncResult({ error: t('toastError') });
     } finally {
       setIsSyncing(false);
@@ -308,7 +310,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     if (!confirm(t('settingsShutdownConfirm'))) return;
 
     try {
-      try { window.close(); } catch (e) { }
+      try { window.close(); } catch {
+        // Some browser shells block scripted window close.
+      }
 
       await axios.post(`${apiUrl}/shutdown`);
 
@@ -738,7 +742,9 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
                 <div className="flex items-center justify-between p-3 hover:bg-surface-container rounded-2xl transition-colors cursor-pointer" onClick={async () => {
                   const newVal = !startMinimized;
                   setStartMinimized(newVal);
-                  try { await axios.post(`${apiUrl}/api/settings/start_minimized`, { value: newVal }); } catch(e) {}
+                  try { await axios.post(`${apiUrl}/api/settings/start_minimized`, { value: newVal }); } catch {
+                    // Persisting this preference is best-effort.
+                  }
                 }}>
                   <div>
                     <p className="text-sm font-semibold text-on-surface">Iniciar minimizado na bandeja</p>

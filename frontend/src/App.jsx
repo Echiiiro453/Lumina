@@ -59,7 +59,6 @@ function App() {
   const [quality, setQuality] = useState('320'); // Default: Ultra MP3
   const [subtitle, setSubtitle] = useState('none');
   const [mode, setMode] = useState('audio'); // 'audio' | 'video'
-  const [playlist, setPlaylist] = useState(false); // Baixar playlist inteira?
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(null); // 'success', 'error'
   const [message, setMessage] = useState('');
@@ -169,7 +168,7 @@ function App() {
   const [pitch, setPitch] = useState(0); // -12 to +12
 
   // Language state – changing this triggers full re-render so translations update
-  const [lang, setLang] = useState(getLanguage());
+  const [, setLang] = useState(getLanguage());
 
   const handleLanguageChange = (code) => {
     setLanguage(code);
@@ -201,34 +200,15 @@ function App() {
   const [showShazamModal, setShowShazamModal] = useState(false);
   const [showMobileSync, setShowMobileSync] = useState(false);
   const [showSubscriptionsModal, setShowSubscriptionsModal] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuTimeoutRef = React.useRef(null);
-
-  const handleMenuEnter = () => {
-    if (menuTimeoutRef.current) {
-      clearTimeout(menuTimeoutRef.current);
-      menuTimeoutRef.current = null;
-    }
-    setIsMenuOpen(true);
-  };
-
-  const handleMenuLeave = () => {
-    menuTimeoutRef.current = setTimeout(() => {
-      setIsMenuOpen(false);
-    }, 500); // Tolerância de 500ms
-  };
-
   // Playlist Manager
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [playlistVideos, setPlaylistVideos] = useState([]);
   const [selectedVideos, setSelectedVideos] = useState(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
-  const [resolvedUrl, setResolvedUrl] = useState('');
 
   // Integrated Search
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Queue System (Batch Download)
   const [queue, setQueue] = useState([]);
@@ -259,7 +239,7 @@ function App() {
 
   // Ctrl+V / Cmd+V: Auto-paste URL from clipboard into the search bar
   useEffect(() => {
-    const handlePaste = async (e) => {
+    const handlePaste = async () => {
       const active = document.activeElement;
       const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
       if (isTyping) return; // Don't interfere when user is typing in a field
@@ -275,7 +255,7 @@ function App() {
           if (detected === 'audio') setMode('audio');
           addToast('🔗 URL colada automaticamente!', 'success');
         }
-      } catch (err) {
+      } catch {
         // Clipboard permission denied — fail silently
       }
     };
@@ -373,7 +353,7 @@ function App() {
       } else if (manual) {
         alert("Você já está usando a versão mais recente!");
       }
-    } catch (e) {
+    } catch {
       if (manual) alert("Erro ao checar atualizações.");
     } finally {
       setIsCheckingUpdate(false);
@@ -459,7 +439,9 @@ function App() {
             return;
           }
           setGlobalJobs(data);
-        } catch (e) {}
+        } catch {
+          // Ignore malformed WebSocket messages.
+        }
       };
       ws.onclose = () => {
         reconnectTimer = setTimeout(connectWs, 3000);
@@ -605,11 +587,11 @@ function App() {
     if (!metadata?.is_playlist) return;
 
     setPlaylistLoading(true);
-    console.log('🔍 Buscando detalhes da playlist...', resolvedUrl || url);
+    console.log('🔍 Buscando detalhes da playlist...', url);
 
     try {
       const res = await axios.post(getApiUrl('/playlist/details'), {
-        url: resolvedUrl || url,
+        url,
         limit: playlistLimit
       }, {
         timeout: 60000 // 60 segundos
@@ -649,16 +631,6 @@ function App() {
       newSelected.add(index);
     }
     setSelectedVideos(newSelected);
-  };
-
-  const selectAllVideos = () => {
-    // Select ONLY pending
-    const pendingIndices = new Set(
-      playlistVideos
-        .filter(v => v.status !== 'downloaded')
-        .map(v => v.index)
-    );
-    setSelectedVideos(pendingIndices);
   };
 
   const deselectAllVideos = () => {
@@ -727,55 +699,6 @@ function App() {
     }, 500);
   };
 
-  const handleBatchEnqueue = (urlsList) => {
-    if (urlsList.length === 0) return;
-
-    // --- COOKIE ENFORCEMENT ---
-    if (!isAuthenticated) {
-      const confirmUpload = window.confirm(
-        `⚠️ ATENÇÃO: Você está tentando iniciar downloads sem login (sem cookies.txt).\n\n` +
-        `Isso tem uma alta chance de resultar em erros no download ou banimento/bloqueio temporário do seu IP pelo YouTube.\n\n` +
-        `Clique em OK para enviar seus cookies agora (Recomendado), ou CANCELAR para prosseguir por sua conta e risco.`
-      );
-
-      if (confirmUpload) {
-        setShowSettings(true);
-        return;
-      }
-    }
-    // ---------------------------
-
-    const queueItems = urlsList.map((url, idx) => {
-      const displayTitle = url.length > 50 ? url.substring(0, 50) + '...' : url;
-      return {
-        id: undefined,
-        title: displayTitle,
-        thumbnail: null,
-        uploader: 'Lote',
-        duration_string: '—',
-        url: url,
-        uniqueId: Date.now() + Math.random() + idx,
-        pitch: mode === 'audio' ? pitch : 0,
-        speed: mode === 'audio' ? speed : 1.0,
-        subtitle: mode === 'video' ? subtitle : 'none',
-        status: 'pending',
-        progress: 0,
-        addedAt: Date.now()
-      };
-    });
-
-    setQueue(prev => [...prev, ...queueItems]);
-    setShowQueue(true);
-
-    addToast(t('batchAddedToast') ? t('batchAddedToast').replace('x', queueItems.length) : `${queueItems.length} links adicionados à fila!`, 'success');
-
-    // Tentar iniciar automaticamente após render
-    setTimeout(() => {
-      const startBtn = document.getElementById('start-downloads-btn');
-      if (startBtn) startBtn.click();
-    }, 500);
-  };
-
   // ===== REDOWNLOAD LOGIC =====
   const executeRetry = async (video, playlistId) => {
     try {
@@ -784,7 +707,7 @@ function App() {
         return;
       }
       addToast(`Reiniciando download: ${video.title}`, 'info');
-      const res = await axios.post(getApiUrl('/download/retry'), {
+      await axios.post(getApiUrl('/download/retry'), {
         playlist_id: playlistId,
         video_id: video.id
       });
@@ -857,66 +780,6 @@ function App() {
   const processQueue = () => {
     setIsProcessingQueue(true);
     setShowQueue(true);
-  };
-
-  // Independent Downloader Function
-  const downloadItem = async (item) => {
-    updateQueueItem(item.uniqueId, { status: 'downloading', progress: 0 });
-
-    try {
-      const downloadUrl = item.url || `https://www.youtube.com/watch?v=${item.id}`;
-
-      // Enqueue
-      const response = await axios.post(getApiUrl('/download'), {
-        url: downloadUrl,
-        quality: quality,
-        mode: mode,
-        pitch: item.pitch !== undefined ? item.pitch : pitch,
-        speed: item.speed !== undefined ? item.speed : speed,
-        organize: organizeByArtist,
-        organize_by_playlist: organizeByPlaylist,
-        sponsorblock_enabled: sponsorblockEnabled,
-        video_codec: videoCodec,
-        compress_video: compressVideo
-      });
-
-      const { job_id } = response.data;
-
-      // Poll
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await axios.get(getApiUrl(`/download/status/${job_id}`));
-          const statusData = statusRes.data;
-
-          if (statusData.status === 'downloading') {
-            updateQueueItem(item.uniqueId, {
-              status: 'downloading',
-              progress: statusData.progress || 1
-            });
-          } else if (statusData.status === 'processing') {
-            updateQueueItem(item.uniqueId, { status: 'processing', progress: 99 });
-          } else if (statusData.status === 'done') {
-            clearInterval(pollInterval);
-            updateQueueItem(item.uniqueId, { status: 'completed', progress: 100 });
-          } else if (statusData.status === 'error') {
-            clearInterval(pollInterval);
-            let queueErrMsg = statusData.error || 'Erro';
-              if (!isAuthenticated) {
-                  queueErrMsg += ' (Dica: Adicione seus cookies.txt nas configurações!)';
-              }
-              updateQueueItem(item.uniqueId, { status: 'error', error: queueErrMsg });
-          }
-        } catch (e) {
-          console.error(e);
-          clearInterval(pollInterval);
-          updateQueueItem(item.uniqueId, { status: 'error', error: 'Poll failed' });
-        }
-      }, 1000);
-
-    } catch (error) {
-      console.error(error);
-      updateQueueItem(item.uniqueId, { status: 'error', progress: 0 });
-    }
   };
 
   // Queue Monitor Effect
@@ -2224,6 +2087,7 @@ function App() {
           apiUrl={getApiUrl()}
         />
       </AnimatePresence>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
     </>
   );
 }

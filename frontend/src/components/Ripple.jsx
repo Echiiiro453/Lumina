@@ -5,7 +5,7 @@
  */
 import React, { useState, useCallback } from 'react';
 
-export function useRipple() {
+function useRipple() {
   const [ripples, setRipples] = useState([]);
 
   const addRipple = useCallback((e) => {
@@ -28,7 +28,7 @@ export function useRipple() {
   };
 }
 
-export function Ripples({ ripples, color = 'rgba(255,255,255,0.25)' }) {
+function Ripples({ ripples, color = 'rgba(255,255,255,0.25)' }) {
   return (
     <>
       {ripples.map(r => (

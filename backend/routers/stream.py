@@ -1,36 +1,18 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import asyncio
 import os
-import urllib.request
-from urllib.request import Request as URLRequest, urlopen
-from urllib.parse import urlparse
 import yt_dlp
-import json
 
 from utils import clean_url, get_cookies_path, get_data_dir
-from magic_parsers import _spotipy_fetch
 from database import get_downloaded_ids
-from downloader import jobs
 
 router = APIRouter()
 
 class SearchRequest(BaseModel):
     query: str
     limit: int = 20
-
-class ResolveStreamRequest(BaseModel):
-    audio_data: str
-
-class ProxyRequest(BaseModel):
-    url: str
-
-class SpotipyPlaylistRequest(BaseModel):
-    url: str
-
-class SpotipyArtistRequest(BaseModel):
-    url: str
 
 @router.post("/search")
 async def search_youtube(request: SearchRequest):
@@ -45,7 +27,6 @@ async def search_youtube(request: SearchRequest):
 
     if is_ytm:
         try:
-            import json
             import requests as cffi_requests
             api_url = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
             headers = {
@@ -164,18 +145,6 @@ def parse_magic_url(url: str):
         pseudo_playlist, is_magic, magic_source, cover_url, new_url = res
         return new_url, pseudo_playlist, is_magic, magic_source, cover_url
     return url, None, False, None, None
-
-def clean_url(url: str) -> str:
-    import urllib.parse
-    try:
-        parsed = urllib.parse.urlparse(url)
-        qs = urllib.parse.parse_qs(parsed.query)
-        for param in ["si", "pp", "utm_source", "utm_medium", "utm_campaign", "gclid", "fbclid"]:
-            qs.pop(param, None)
-        new_query = urllib.parse.urlencode(qs, doseq=True)
-        return urllib.parse.urlunparse(parsed._replace(query=new_query))
-    except:
-        return url
 
 # ──────────────────────────────────────────────────────────────────────────────
 # STREAMING — resolve audio URL without downloading
@@ -564,193 +533,7 @@ async def get_info(request: StreamDownloadRequest):
         else:
             # Prevent falling back to yt-dlp for raw Spotify/Apple Music URLs if magic parser failed
             if any(domain in url for domain in ['spotify.com', 'music.apple.com', 'deezer.com']) and not url.startswith('ytsearch'):
-                raise HTTPException(status_code=400, detail="N├úo foi poss├¡vel extrair dados deste servi├ºo (verifique se a playlist ├® privada ou tente novamente mais tarde).")
-                
-            ydl_opts = {
-                'quiet': True,
-                'nocheckcertificate': True,
-                'extract_flat': 'in_playlist',
-                'cookiefile': get_cookies_path(),
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'js_runtimes': {
-                    'node': {},
-                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
-                },
-                'remote_components': ['ejs:github']
-            }
-            
-            info = None
-            last_err = None
-            for client in ['android_vr', 'tv_embedded', 'web_embedded', 'ios_music', 'android_music', 'tv', 'web', 'web_creator']:
-                try:
-                    if client != 'web': ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                    break
-                except Exception as e: 
-                    last_err = str(e)
-                    if "does not look like a Netscape format cookies file" in last_err or "cookie" in last_err.lower():
-                        if 'cookiefile' in ydl_opts:
-                            print(f"Cookie error in get_info, retrying without cookies: {last_err}")
-                            ydl_opts.pop('cookiefile', None)
-                            try:
-                                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                                    info = ydl2.extract_info(url, download=False)
-                                break
-                            except Exception as e2:
-                                last_err = str(e2)
-                
-            if not info: 
-                err_msg = "Falha ao extrair info."
-                if last_err: err_msg += f" Detalhes: {last_err}"
-                raise HTTPException(status_code=500, detail=err_msg)
-                
-            if is_magic and not pseudo_playlist and 'entries' in info:
-                if len(info['entries']) > 0:
-                    info = info['entries'][0]
-                else:
-                    raise HTTPException(status_code=404, detail="M├║sica n├úo encontrada")
-                
-            is_playlist = ('entries' in info or info.get('playlist_id')) and (not is_magic or pseudo_playlist is not None) 
-        
-        duration_str = info.get('duration_string')
-        if not duration_str and info.get('duration'):
-            import datetime
-            duration_str = str(datetime.timedelta(seconds=info['duration']))
-            if duration_str.startswith('0:'): duration_str = duration_str[2:] 
-
-        resolutions = []
-        if not is_magic:
-            if is_playlist:
-                resolutions = [2160, 1440, 1080, 720, 480, 360, 240, 144]
-            else:
-                formats = info.get('formats', [])
-                res_set = set()
-                for f in formats:
-                    if f.get('vcodec') != 'none' and f.get('height'): res_set.add(f['height'])
-                resolutions = sorted(list(res_set), reverse=True)
-
-        subs_list = []
-        if info.get('subtitles'):
-            for lang in info['subtitles'].keys():
-                subs_list.append({"code": lang, "name": f"{lang.upper()}", "is_auto": False})
-        if info.get('automatic_captions'):
-            for lang in info['automatic_captions'].keys():
-                if not any(s['code'] == lang for s in subs_list):
-                    subs_list.append({"code": lang, "name": f"{lang.upper()} (Auto)", "is_auto": True})
-
-        return {
-            "status": "success",
-            "title": info['entries'][0].get('title') if ('entries' in info and 'v=' in request.url) else info.get('title'),
-            "thumbnail": magic_cover or info.get('thumbnail'),
-            "url": info.get('webpage_url', request.url),
-            "resolutions": resolutions,
-            "subtitles": subs_list,
-            "is_playlist": is_playlist,
-            "duration": info.get('duration'),
-            "duration_string": duration_str,
-            "magic_source": magic_source
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/playlist/details")
-def get_playlist_details(request: InfoRequest):
-    try:
-        url, pseudo_playlist, is_magic, magic_source, magic_cover = parse_magic_url(request.url)
-        
-        if pseudo_playlist:
-            playlist_info = pseudo_playlist
-        else:
-            ydl_opts = {
-                'quiet': True,
-                'nocheckcertificate': True,
-                'ignoreerrors': True,
-                'extract_flat': 'in_playlist',
-                'cookiefile': get_cookies_path(),
-                'js_runtimes': {
-                    'node': {},
-                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
-                },
-                'remote_components': ['ejs:github']
-            }
-            if request.limit > 0: ydl_opts['playlistend'] = request.limit
-            
-            playlist_info = None
-            for client in ['web_embedded', 'tv_embedded', 'web', 'android']:
-                try:
-                    if client != 'web': ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        playlist_info = ydl.extract_info(url, download=False)
-                    break
-                except Exception as e:
-                    err_str = str(e)
-                    if "does not look like a Netscape format cookies file" in err_str or "cookie" in err_str.lower():
-                        if 'cookiefile' in ydl_opts:
-                            print(f"Cookie error in playlist details, retrying without cookies: {err_str}")
-                            ydl_opts.pop('cookiefile', None)
-                            try:
-                                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                                    playlist_info = ydl2.extract_info(url, download=False)
-                                break
-                            except Exception: pass
-                    pass
-            
-        if not playlist_info or 'entries' not in playlist_info:
-            raise HTTPException(status_code=400, detail="URL n├úo ├® uma playlist ou falhou")
-            
-        playlist_id = playlist_info.get('id', '')
-        downloaded_ids = set(get_downloaded_ids(playlist_id)) if playlist_id else set()
-        
-        videos = []
-        for idx, entry in enumerate(playlist_info['entries']):
-            if entry is None: continue
-            entry_id = entry.get('id', '')
-            videos.append({
-                "index": idx,
-                "id": entry_id,
-                "title": entry.get('title', 'Sem t├¡tulo'),
-                "thumbnail": entry.get('thumbnail') or entry.get('thumbnails', [{}])[0].get('url'),
-                "duration": entry.get('duration', 0),
-                "uploader": entry.get('uploader', entry.get('channel', 'Desconhecido')),
-                "url": entry.get('url') or entry.get('webpage_url') or f"https://www.youtube.com/watch?v={entry_id}",
-                "status": 'downloaded' if entry_id in downloaded_ids else 'pending',
-                "playlistIdRef": playlist_id
-            })
-            
-        return {
-            "status": "success",
-            "playlist_id": playlist_id,
-            "title": playlist_info.get('title', 'Playlist'),
-            "total_videos": len(videos),
-            "videos": videos,
-            "magic_source": magic_source
-        }
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-class StreamDownloadRequest(BaseModel):
-    url: str
-    mode: str = "audio"
-    playlist: bool = False
-
-@router.post("/info")
-async def get_info(request: StreamDownloadRequest):
-    try:
-        url = clean_url(request.url)
-        url, pseudo_playlist, is_magic, magic_source, magic_cover = await asyncio.to_thread(parse_magic_url, url)
-
-        if pseudo_playlist:
-            info = pseudo_playlist
-            is_playlist = True
-            is_magic = True
-        else:
-            # Prevent falling back to yt-dlp for raw Spotify/Apple Music URLs if magic parser failed
-            if any(domain in url for domain in ['spotify.com', 'music.apple.com', 'deezer.com']) and not url.startswith('ytsearch'):
-                raise HTTPException(status_code=400, detail="N├úo foi poss├¡vel extrair dados deste servi├ºo (verifique se a playlist ├® privada ou tente novamente mais tarde).")
+                raise HTTPException(status_code=400, detail="Não foi possível extrair dados deste serviço (verifique se a playlist é privada ou tente novamente mais tarde).")
                 
             ydl_opts = {
                 'quiet': True,
@@ -772,7 +555,7 @@ async def get_info(request: StreamDownloadRequest):
                 try:
                     if client == 'web_sabr':
                         ydl_opts['extractor_args'] = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}, 'youtube': {'formats': ['duplicate'], 'player_client': ['web'], 'webpage_client': ['web']}}
-                    elif client != 'web': 
+                    elif client != 'web':
                         ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
                     elif 'extractor_args' in ydl_opts:
                         del ydl_opts['extractor_args']
@@ -801,7 +584,7 @@ async def get_info(request: StreamDownloadRequest):
                 if len(info['entries']) > 0:
                     info = info['entries'][0]
                 else:
-                    raise HTTPException(status_code=404, detail="M├║sica n├úo encontrada")
+                    raise HTTPException(status_code=404, detail="Música não encontrada")
                 
             is_playlist = ('entries' in info or info.get('playlist_id')) and (not is_magic or pseudo_playlist is not None) 
         
@@ -860,7 +643,10 @@ def get_playlist_details(request: InfoRequest):
                 'ignoreerrors': True,
                 'extract_flat': 'in_playlist',
                 'cookiefile': get_cookies_path(),
-                'js_runtimes': {'node': {}},
+                'js_runtimes': {
+                    'node': {},
+                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
+                },
                 'remote_components': ['ejs:github']
             }
             if request.limit > 0: ydl_opts['playlistend'] = request.limit
@@ -886,7 +672,7 @@ def get_playlist_details(request: InfoRequest):
                     pass
             
         if not playlist_info or 'entries' not in playlist_info:
-            raise HTTPException(status_code=400, detail="URL n├úo ├® uma playlist ou falhou")
+            raise HTTPException(status_code=400, detail="URL não é uma playlist ou falhou")
             
         playlist_id = playlist_info.get('id', '')
         downloaded_ids = set(get_downloaded_ids(playlist_id)) if playlist_id else set()
@@ -898,7 +684,7 @@ def get_playlist_details(request: InfoRequest):
             videos.append({
                 "index": idx,
                 "id": entry_id,
-                "title": entry.get('title', 'Sem t├¡tulo'),
+                "title": entry.get('title', 'Sem título'),
                 "thumbnail": entry.get('thumbnail') or entry.get('thumbnails', [{}])[0].get('url'),
                 "duration": entry.get('duration', 0),
                 "uploader": entry.get('uploader', entry.get('channel', 'Desconhecido')),
