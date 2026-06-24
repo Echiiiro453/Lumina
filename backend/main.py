@@ -854,6 +854,230 @@ class PlayExternalRequest(BaseModel):
     file_path: str
 
 
+# =====================================================================
+# Spectral Authenticity Analyzer
+# =====================================================================
+
+class SpectralAnalysisRequest(BaseModel):
+    file_path: str
+
+def _run_ffprobe(file_path: str, ffprobe_exe: str) -> dict:
+    """Extract codec/format metadata via ffprobe."""
+    import subprocess, json
+    CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+    cmd = [
+        ffprobe_exe, "-v", "quiet", "-print_format", "json",
+        "-show_streams", "-show_format", file_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    data = json.loads(result.stdout or "{}")
+    audio_stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {})
+    fmt = data.get("format", {})
+    return {
+        "codec_name": audio_stream.get("codec_name", "unknown").upper(),
+        "codec_long_name": audio_stream.get("codec_long_name", ""),
+        "sample_rate": int(audio_stream.get("sample_rate", 44100)),
+        "channels": int(audio_stream.get("channels", 2)),
+        "bit_depth": int(audio_stream.get("bits_per_raw_sample") or audio_stream.get("bits_per_sample") or 0),
+        "bitrate_kbps": round(int(fmt.get("bit_rate", 0)) / 1000),
+        "duration_sec": float(fmt.get("duration", 0)),
+        "container": fmt.get("format_name", "").split(",")[0].upper(),
+        "size_bytes": int(fmt.get("size", 0)),
+    }
+
+def _analyze_spectrogram_image(img_path: str, sample_rate: int) -> dict:
+    """
+    Analyze the showspectrumpic PNG to calculate spectral cutoff.
+    showspectrumpic maps frequency linearly from 0 Hz (bottom) to Nyquist (top).
+    Color intensity = energy presence.
+    """
+    from PIL import Image
+    import numpy as np
+
+    nyquist_hz = sample_rate / 2.0
+
+    img = Image.open(img_path).convert("RGB")
+    width, height = img.size
+
+    # Remove legend area (right ~15% of image is typically the legend bar)
+    # and bottom label area (~3% of height)
+    legend_cutoff = int(width * 0.88)
+    label_rows_bottom = int(height * 0.04)
+
+    arr = np.array(img)
+    # Crop: remove legend column and label rows
+    arr = arr[label_rows_bottom:, :legend_cutoff, :]
+
+    effective_height = arr.shape[0]
+
+    # Luminance per row (freq band): bright = energy present
+    luminance = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
+    
+    # Mean luminance per row (each row = one frequency band)
+    row_lum = luminance.mean(axis=1)
+
+    # showspectrumpic: row 0 = highest freq, row H = 0 Hz (log scale layout)
+    # Flip so index 0 = 0 Hz, index H = nyquist
+    row_lum = row_lum[::-1]
+
+    # Normalize 0-1
+    row_lum = row_lum / (row_lum.max() + 1e-9)
+
+    # Energy threshold: consider a freq "active" if luminance > 2%
+    ENERGY_THRESH = 0.02
+    active_mask = row_lum > ENERGY_THRESH
+
+    # Spectral cutoff: highest frequency row where energy is sustained
+    # Walk from top down; find last row where > 5% of a 20-row window is active
+    cutoff_row = 0
+    window = 20
+    for i in range(effective_height - window, 0, -1):
+        if active_mask[i:i+window].mean() > 0.05:
+            cutoff_row = i + window
+            break
+
+    cutoff_hz = int((cutoff_row / effective_height) * nyquist_hz)
+
+    # High-band energy (above 16kHz)
+    high_band_start = int((16000 / nyquist_hz) * effective_height)
+    high_band_lum = row_lum[high_band_start:].mean() if high_band_start < effective_height else 0.0
+
+    # Brickwall detection: sharp drop in energy within 500Hz band
+    brickwall = False
+    if 0 < cutoff_row < effective_height - 5:
+        below = row_lum[max(0, cutoff_row - 15):cutoff_row].mean()
+        above = row_lum[cutoff_row:min(effective_height, cutoff_row + 15)].mean()
+        if below > 0.05 and above < 0.005:
+            brickwall = True
+
+    return {
+        "cutoff_hz": cutoff_hz,
+        "high_band_energy_ratio": round(float(high_band_lum), 4),
+        "brickwall_detected": brickwall,
+    }
+
+def _compute_risk(codec: str, cutoff_hz: int, brickwall: bool, nyquist: int) -> tuple[str, str]:
+    """Return (quality_risk, confidence)."""
+    # Lossy codec → always LOSSY
+    lossy_codecs = {"MP3", "AAC", "OGG", "OPUS", "VORBIS", "WMA", "M4A"}
+    if any(c in codec.upper() for c in lossy_codecs):
+        return "LOSSY_SOURCE", "HIGH"
+
+    # Unknown codec, no data
+    if cutoff_hz == 0:
+        return "UNKNOWN", "LOW"
+
+    # Thresholds as % of nyquist (handles 44.1/48/96kHz masters)
+    pct = cutoff_hz / nyquist if nyquist > 0 else 0
+
+    if cutoff_hz < 15000:
+        risk, conf = "LOSSY_SOURCE", "HIGH"
+    elif cutoff_hz < 16500:
+        risk, conf = "POSSIBLE_TRANSCODE", "HIGH"
+    elif cutoff_hz < 18500:
+        risk, conf = "POSSIBLE_TRANSCODE", "MEDIUM"
+    elif cutoff_hz < 20000 or pct < 0.85:
+        risk, conf = "POSSIBLE_TRANSCODE", "LOW"
+    else:
+        risk, conf = "LOSSLESS_LIKELY", "HIGH"
+
+    # Brickwall escalates risk
+    if brickwall and risk == "LOSSLESS_LIKELY":
+        risk, conf = "POSSIBLE_TRANSCODE", "MEDIUM"
+    elif brickwall and risk == "POSSIBLE_TRANSCODE" and conf == "LOW":
+        conf = "MEDIUM"
+
+    return risk, conf
+
+@app.post("/api/spectral-analysis")
+async def spectral_analysis(req: SpectralAnalysisRequest):
+    """
+    Generate a spectrogram and analyze spectral authenticity for the given audio file.
+    Returns: spectrogram (base64 PNG), cutoff_hz, quality_risk, metadata.
+    """
+    import subprocess, base64, tempfile
+    from utils import get_resource_path, get_downloads_dir
+
+    file_path = req.file_path
+    # Resolve relative paths (stored as bare filename in DB) the same way /api/track_metadata does
+    if not os.path.isabs(file_path) and not os.path.exists(file_path):
+        file_path = os.path.join(get_downloads_dir(), file_path)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    ffmpeg_exe = get_resource_path("ffmpeg.exe")
+    ffprobe_exe = get_resource_path("ffprobe.exe")
+    if not os.path.exists(ffmpeg_exe):
+        ffmpeg_exe = "ffmpeg"
+    if not os.path.exists(ffprobe_exe):
+        ffprobe_exe = "ffprobe"
+
+    CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+    try:
+        # 1. Get file metadata
+        metadata = _run_ffprobe(file_path, ffprobe_exe)
+
+        # 2. Generate spectrogram image
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spec_path = os.path.join(tmpdir, "spectrogram.png")
+
+            cmd = [
+                ffmpeg_exe, "-y", "-i", file_path,
+                "-lavfi",
+                "showspectrumpic=s=1024x512:scale=log:legend=1:color=intensity:gain=5",
+                "-frames:v", "1",
+                spec_path
+            ]
+            proc = subprocess.run(cmd, capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=60)
+
+            if proc.returncode != 0 or not os.path.exists(spec_path):
+                err = proc.stderr.decode("utf-8", errors="ignore")
+                raise HTTPException(status_code=500, detail=f"FFmpeg error: {err[:300]}")
+
+            # 3. Analyze spectrogram image
+            spectral = _analyze_spectrogram_image(spec_path, metadata["sample_rate"])
+
+            # 4. Encode image to base64
+            with open(spec_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode("ascii")
+
+        # 5. Compute risk
+        nyquist = metadata["sample_rate"] // 2
+        risk, confidence = _compute_risk(
+            metadata["codec_name"],
+            spectral["cutoff_hz"],
+            spectral["brickwall_detected"],
+            nyquist
+        )
+
+        return {
+            "type": "telemetry",
+            "name": "SpectralAuthenticity",
+            "container": metadata["container"],
+            "codec": metadata["codec_name"],
+            "sampleRate": metadata["sample_rate"],
+            "nyquistHz": nyquist,
+            "bitDepth": metadata["bit_depth"],
+            "bitrateKbps": metadata["bitrate_kbps"],
+            "channels": metadata["channels"],
+            "durationSec": metadata["duration_sec"],
+            "spectralCutoffHz": spectral["cutoff_hz"],
+            "highBandEnergyRatio": spectral["high_band_energy_ratio"],
+            "brickwallDetected": spectral["brickwall_detected"],
+            "qualityRisk": risk,
+            "confidence": confidence,
+            "spectrogram_b64": img_b64,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SpectralAnalysis] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 
 class MiniplayerStateRequest(BaseModel):
     title: str

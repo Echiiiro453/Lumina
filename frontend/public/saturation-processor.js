@@ -19,6 +19,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
     this.mode = 'tube';
     this.drive = 0.3;  // 0–1
     this.mix = 0.25; // wet/dry 0–1
+    this.outputTrimGain = 1;
 
     this.prevX = null;     // Stored per-channel history: Float32Array(2) per channel: [x(n-1), x(n-2)]
     this.rmsIn = null;     // Short-term RMS energy tracking for input
@@ -37,6 +38,19 @@ class SaturationProcessor extends AudioWorkletProcessor {
         changed = true;
       }
       if (data.mix !== undefined) this.mix = data.mix;
+      if (data.outputTrimDb !== undefined) {
+        this.outputTrimGain = Math.pow(10, Math.max(-12, Math.min(0, data.outputTrimDb)) / 20);
+      }
+      if (data.type === 'reset') {
+        const stateArrays = [
+          this.rmsIn, this.rmsOut, this.biasState, this.magState1, this.magState2,
+          this.magState3, this.magState4, this.magState5, this.lfNoiseState,
+          this.prevH, this.pinkB0, this.pinkB1, this.pinkB2, this.dcBlockX,
+          this.dcBlockY, this.postDcX, this.postDcY, this.lowShelfY, this.fastRmsIn
+        ];
+        stateArrays.forEach(state => state?.fill(0));
+        this.prevX?.forEach(state => state.fill(0));
+      }
 
       if (changed) {
         this.recalcCoefficients();
@@ -195,6 +209,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
       // Pink noise filter states
       this.pinkB0 = new Float32Array(chs);
       this.pinkB1 = new Float32Array(chs);
+      this.pinkB2 = new Float32Array(chs);
       this.dcBlockX = new Float32Array(chs);
       this.dcBlockY = new Float32Array(chs);
       this.postDcX = new Float32Array(chs);
@@ -223,6 +238,9 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
         // Safeguard original input for clean dry mix path
         const xOrigSafe = (isNaN(xOrig) || !isFinite(xOrig)) ? 0.0 : xOrig;
+
+        // Update input RMS energy (slow integration constant tau ~ 2.2s)
+        this.rmsIn[ch] = this.rmsIn[ch] * rmsCoeff + (xOrigSafe * xOrigSafe) * (1 - rmsCoeff);
 
         // 0. Pre-Saturation High-Pass Filter (fc ~ 30Hz)
         // Corta os subgraves que causam "fuzz" na válvula, preservando-os no Dry Signal.
@@ -471,7 +489,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
         this.postDcY[ch] = finalSignal - postDcLastIn + R_post * this.postDcY[ch];
 
         // Safety Soft-Clipper para proteger o DAC da placa de som
-        outCh[i] = Math.tanh(this.postDcY[ch]);
+        outCh[i] = Math.tanh(this.postDcY[ch]) * this.outputTrimGain;
 
         if (ch === 0) {
           this._dbgIn = (this._dbgIn || 0) + xOrigSafe * xOrigSafe;

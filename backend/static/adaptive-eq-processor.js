@@ -10,8 +10,19 @@
 class AdaptiveEQProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.active = false;
-    this.port.onmessage = (e) => { if (e.data.active !== undefined) this.active = !!e.data.active; };
+    this.targetActive = 0.0;
+    this.currentActive = 0.0;
+    this.isFirstMessage = true;
+
+    this.port.onmessage = (e) => {
+      if (e.data.active !== undefined) {
+        this.targetActive = e.data.active ? 1.0 : 0.0;
+        if (this.isFirstMessage) {
+          this.currentActive = this.targetActive;
+          this.isFirstMessage = false;
+        }
+      }
+    };
 
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
@@ -76,7 +87,9 @@ class AdaptiveEQProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
-    if (!this.active) {
+    this.currentActive += (this.targetActive - this.currentActive) * 0.002;
+
+    if (this.currentActive < 1e-4 && this.targetActive === 0.0) {
       if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
         outputs[0][0].set(inputs[0][0]);
         if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
@@ -129,7 +142,9 @@ class AdaptiveEQProcessor extends AudioWorkletProcessor {
         this.gainLow[c]  = gAlpha * this.gainLow[c]  + (1 - gAlpha) * this.targetL[c];
         this.gainHigh[c] = gAlpha * this.gainHigh[c] + (1 - gAlpha) * this.targetH[c];
 
-        outCh[i] = (low * this.gainLow[c]) + mid + (high * this.gainHigh[c]);
+        const processed = (low * this.gainLow[c]) + mid + (high * this.gainHigh[c]);
+        const mix = this.currentActive;
+        outCh[i] = sample * (1.0 - mix) + processed * mix;
       }
     }
 

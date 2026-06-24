@@ -31,15 +31,27 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
     this.attackAmount  = 0.0; // -1.0 a 1.0
     this.sustainAmount = 0.0; // -1.0 a 1.0
 
+    this.targetActive = 0.0;
+    this.currentActive = 0.0;
+    this.isFirstMessage = true;
+
     this.port.onmessage = (e) => {
-      if (e.data.active !== undefined) this.active = !!e.data.active;
+      if (e.data.active !== undefined) {
+        this.targetActive = e.data.active ? 1.0 : 0.0;
+        if (this.isFirstMessage) {
+          this.currentActive = this.targetActive;
+          this.isFirstMessage = false;
+        }
+      }
       if (e.data.attackAmount  !== undefined) this.attackAmount  = e.data.attackAmount;
       if (e.data.sustainAmount !== undefined) this.sustainAmount = e.data.sustainAmount;
     };
   }
 
   process(inputs, outputs) {
-    if (!this.active) {
+    this.currentActive += (this.targetActive - this.currentActive) * 0.002;
+
+    if (this.currentActive < 1e-4 && this.targetActive === 0.0) {
       if (inputs[0] && inputs[0][0] && outputs[0] && outputs[0][0]) {
         outputs[0][0].set(inputs[0][0]);
         if (inputs[0][1] && outputs[0][1]) outputs[0][1].set(inputs[0][1]);
@@ -94,7 +106,9 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
         }
 
         // Limites de segurança (prevenir clipping de barramento ou mudo total)
-        outCh[i] = sample * Math.max(0.05, Math.min(gain, 4.0));
+        const processed = sample * Math.max(0.05, Math.min(gain, 4.0));
+        const mix = this.currentActive;
+        outCh[i] = sample * (1.0 - mix) + processed * mix;
       }
       
       this.envFast[c] = envF;

@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import yt_dlp
 import json
 
-from utils import clean_url, get_cookies_path
+from utils import clean_url, get_cookies_path, get_data_dir
 from magic_parsers import _spotipy_fetch
 from database import get_downloaded_ids
 from downloader import jobs
@@ -572,7 +572,12 @@ async def get_info(request: StreamDownloadRequest):
                 'extract_flat': 'in_playlist',
                 'cookiefile': get_cookies_path(),
                 'writesubtitles': True,
-                'writeautomaticsub': True
+                'writeautomaticsub': True,
+                'js_runtimes': {
+                    'node': {},
+                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
+                },
+                'remote_components': ['ejs:github']
             }
             
             info = None
@@ -664,7 +669,10 @@ def get_playlist_details(request: InfoRequest):
                 'ignoreerrors': True,
                 'extract_flat': 'in_playlist',
                 'cookiefile': get_cookies_path(),
-                'js_runtimes': {'node': {}},
+                'js_runtimes': {
+                    'node': {},
+                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
+                },
                 'remote_components': ['ejs:github']
             }
             if request.limit > 0: ydl_opts['playlistend'] = request.limit
@@ -750,7 +758,12 @@ async def get_info(request: StreamDownloadRequest):
                 'extract_flat': 'in_playlist',
                 'cookiefile': get_cookies_path(),
                 'writesubtitles': True,
-                'writeautomaticsub': True
+                'writeautomaticsub': True,
+                'js_runtimes': {
+                    'node': {},
+                    'deno': {'path': os.path.join(get_data_dir(), 'deno', 'deno.exe')}
+                },
+                'remote_components': ['ejs:github']
             }
             
             info = None

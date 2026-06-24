@@ -441,6 +441,83 @@ async function test_worklet_adaptive_eq() {
   } catch(e) { fail++; addResult(card.name, 'fail', e.message); }
 }
 
+async function test_worklet_master_out_crash_guard() {
+  const card = { name: 'MasterOut Worklet: Crash Guard & Safe Bypass' };
+  try {
+    const ctx = new OfflineAudioContext(2, 44100, 44100);
+    try {
+      await ctx.audioWorklet.addModule('/master-out-processor.js');
+    } catch(loadErr) {
+      skip++; addResult(card.name, 'skip', `Arquivo não encontrado: ${loadErr.message}`);
+      return;
+    }
+    
+    // Cria buffer de teste
+    const buf = ctx.createBuffer(2, 44100, 44100);
+    const L = buf.getChannelData(0);
+    const R = buf.getChannelData(1);
+    for (let i = 0; i < 44100; i++) {
+      L[i] = 0.5 * Math.sin(2 * Math.PI * 440 * i / 44100);
+      R[i] = 0.5 * Math.sin(2 * Math.PI * 440 * i / 44100);
+    }
+    
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    
+    const node = new AudioWorkletNode(ctx, 'master-out', { 
+      numberOfInputs: 1, 
+      numberOfOutputs: 1, 
+      outputChannelCount: [2] 
+    });
+    
+    let errorReceived = false;
+    node.port.onmessage = (e) => {
+      if (e.data.type === 'error' && e.data.name === 'MasterOut' && e.data.safeBypassActive === true) {
+        errorReceived = true;
+      }
+    };
+    
+    // Força o erro no Worklet
+    node.port.postMessage({ triggerError: true });
+    
+    src.connect(node);
+    node.connect(ctx.destination);
+    
+    src.start(0);
+    
+    // Pequena pausa para garantir a entrega da mensagem antes do rendering começar
+    await new Promise(r => setTimeout(r, 20));
+    
+    const rendered = await ctx.startRendering();
+    
+    // Aguarda a mensagem assíncrona da porta
+    await new Promise(r => setTimeout(r, 50));
+    
+    // Calcula RMS do buffer renderizado
+    let sum = 0;
+    const outData = rendered.getChannelData(0);
+    for (let i = 0; i < outData.length; i++) {
+      sum += outData[i] * outData[i];
+    }
+    const rms = Math.sqrt(sum / outData.length);
+    const rmsDb = 20 * Math.log10(Math.max(rms, 1e-12));
+    
+    const hasSignal = rmsDb > -30;
+    
+    if (errorReceived && hasSignal) {
+      pass++;
+      addResult(card.name, 'pass', `Erro capturado com sucesso e bypass ativo (sinal preservado em ${rmsDb.toFixed(1)} dB)`);
+    } else {
+      fail++;
+      addResult(card.name, 'fail', `Crash Guard falhou. Erro capturado: ${errorReceived} | Sinal RMS: ${rmsDb.toFixed(1)} dB`);
+    }
+  } catch(e) { 
+    fail++; 
+    addResult(card.name, 'fail', e.message); 
+  }
+}
+
+
 // ============================================================
 // BATERIA 2 — TESTES AVANÇADOS
 // ============================================================
@@ -729,6 +806,7 @@ async function runAllTests() {
   await test_audioworklet_available();
   await test_worklet_transient();
   await test_worklet_adaptive_eq();
+  await test_worklet_master_out_crash_guard();
 
   // ── Bateria 2: Testes Avançados ────────────────────────────
   await test_eq_cut();

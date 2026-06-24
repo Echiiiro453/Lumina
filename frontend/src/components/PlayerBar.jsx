@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { RippleButton } from './Ripple';
 import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
 import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
+import { getAutoCalibrationProfile, SEEK_TEMP_HEADROOM_DB } from '../audio/presets/autoCalibrationProfiles';
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
 export const logToCMD = (source, message, level = "info") => {
@@ -299,6 +300,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const [enableSaturation, setEnableSaturation] = useState(false);
   const [satDrive, setSatDrive] = useState(0.20);
+  const [satMix, setSatMix] = useState(0.25);
+  const [saturationOutputTrimDb, setSaturationOutputTrimDb] = useState(0);
   const [satMode, setSatMode] = useState('tube');
   const saturationRef = useRef(null);
 
@@ -350,6 +353,15 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [genreProfile, setGenreProfile] = useState('Rock');
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [harmonicExciter, setHarmonicExciter] = useState('medium');
+  const [autoCalibProfile, setAutoCalibProfile] = useState(null);
+  const [presetIntensity, setPresetIntensity] = useState(() => {
+    return parseFloat(localStorage.getItem('appmusica_preset_intensity') || '1.0');
+  });
+  const [presetHeadroomConfig, setPresetHeadroomConfig] = useState({
+    extraHeadroomDb: 0,
+    maxMakeupDb: 0,
+    intensity: 1.0
+  });
 
   const [enablePhaseRotation, setEnablePhaseRotation] = useState(false);
   const [enableSpectralGlue, setEnableSpectralGlue] = useState(false);
@@ -365,14 +377,51 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const bassEnhancerGainRef = useRef(null);
   const bassShaperRef = useRef(null);
   const preGainRef = useRef(null);
+  const currentHeadroomDbRef = useRef(-6.0);
+  const seekGateRef = useRef(null);
+  const seekTimeoutRef = useRef(null);
   
   const stereoScopeRef = useRef(null);
   const stereoTelemetryRef = useRef(null);
+  const sourceQualityRef = useRef(null);
+  const sourceQualityTelemetryRef = useRef(null);
+  const multibandStereoTelemetryRef = useRef(null);
+  const truePeakNodeRef = useRef(null);
   const limiterRef = useRef(null);
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
   const crossfadeTimeoutRef = useRef(null);
   const masterTelemetryRef = useRef(null);
+  const lastResumeStatusRef = useRef("PENDING");
+  const lastPerformanceGovernorLogTimeRef = useRef(0);
+  const lastPerformanceGovernorRiskRef = useRef("BAIXO");
+  const governorOverrideRef = useRef({ transientBypassed: false, adaptiveEqBypassed: false });
+  const governorActiveRef = useRef(false);
+  const criticalStreakStartMsRef = useRef(0);
+  const lowStreakStartMsRef = useRef(0);
+  const governorRiskRef = useRef("BAIXO");
+  const enableTransientRef = useRef(false);
+  const enableAdaptiveEqRef = useRef(false);
+
+  useEffect(() => {
+    enableTransientRef.current = enableTransient;
+  }, [enableTransient]);
+
+  useEffect(() => {
+    enableAdaptiveEqRef.current = enableAdaptiveEq;
+  }, [enableAdaptiveEq]);
+
+  const isPlayingRef = useRef(false);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    if (truePeakNodeRef.current && truePeakNodeRef.current.port) {
+      truePeakNodeRef.current.port.postMessage({
+        type: "state",
+        isPlaying: isPlaying
+      });
+    }
+  }, [isPlaying]);
+
   const analyserLRef = useRef(null);
   const analyserRRef = useRef(null);
   const workletAnchorRef = useRef({ pre: null, post: null });
@@ -594,6 +643,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [eqGains, eqPreset]);
 
+  useEffect(() => {
+    localStorage.setItem('appmusica_preset_intensity', presetIntensity.toString());
+  }, [presetIntensity]);
+
 
   // Atualiza em tempo real os nós de processamento do DSP
   useEffect(() => {
@@ -645,7 +698,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     "Catedral": { preDelayMs: 28, rt60: 4.5, wetMix: 0.12, wetWidth: 0.90, wetHpf: 180, wetLpf: 12000 },
     "Estádio": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 },
     "Cave": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65, wetHpf: 200, wetLpf: 6000 },
-    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.12, wetWidth: 0.85, wetHpf: 80, wetLpf: 14000 },
+    "Cinema": { preDelayMs: 22, rt60: 2.8, wetMix: 0.10, wetWidth: 0.85, wetHpf: 180, wetLpf: 14000 },
     "Vastidão": { preDelayMs: 10, rt60: 1.5, wetMix: 0.08, wetWidth: 0.65, wetHpf: 200, wetLpf: 6000 },
     
     // Extreme IRs (Sound Design / Experimental)
@@ -810,8 +863,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   }, [transientAttack, transientSustain]);
 
   useEffect(() => {
-    if (saturationRef.current) saturationRef.current.port.postMessage({ mode: satMode, drive: satDrive, mix: 0.35 });
-  }, [satMode, satDrive]);
+    if (saturationRef.current) {
+      saturationRef.current.port.postMessage({ mode: satMode, drive: satDrive, mix: satMix, outputTrimDb: saturationOutputTrimDb });
+    }
+  }, [satMode, satDrive, satMix, saturationOutputTrimDb]);
 
   useEffect(() => {
     if (crossfeedRef.current) {
@@ -896,10 +951,32 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
     if (maxEqBoost > 3) headroomDb -= 1.5;
 
+    // Apply active sound preset headroom/intensity adjustments
+    if (presetHeadroomConfig) {
+      const { extraHeadroomDb, intensity } = presetHeadroomConfig;
+      headroomDb += (extraHeadroomDb || 0) * intensity;
+      if (intensity > 1.0) {
+        headroomDb -= (intensity - 1.0) * 1.0;
+      }
+    }
+
+    // Apply auto-calibration profile gain adjustments
+    if (autoCalibProfile) {
+      const profileDefaults = getAutoCalibrationProfile(autoCalibProfile.id);
+      if (autoCalibProfile.extraHeadroomDb !== undefined) {
+        headroomDb += Math.max(-12, Math.min(0, autoCalibProfile.extraHeadroomDb));
+      }
+      if (autoCalibProfile.makeupDb !== undefined) {
+        const maxMakeupDb = profileDefaults?.maxMakeupDb ?? 0;
+        headroomDb += Math.max(0, Math.min(maxMakeupDb, autoCalibProfile.makeupDb));
+      }
+    }
+
+    currentHeadroomDbRef.current = headroomDb;
     if (preGainRef.current && audioContextRef.current) {
       preGainRef.current.gain.setTargetAtTime(Math.pow(10, headroomDb / 20), audioContextRef.current.currentTime, 0.15);
     }
-  }, [bassEnhancer, enableSaturation, reverbMix, enable8D, eqGains]);
+  }, [bassEnhancer, enableSaturation, reverbMix, enable8D, eqGains, autoCalibProfile, presetHeadroomConfig]);
 
   useEffect(() => {
     if (deharshRef.current) deharshRef.current.port.postMessage({ active: enableDeharsh });
@@ -988,8 +1065,40 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
              applied: true
           }), "info");
        }
-    }
+     }
   }, [genreProfile, enable8D]);
+
+  const handlePresetApplied = (presetName, intensity, config) => {
+    setTimeout(() => {
+      const corrVal = stereoTelemetryRef.current ? stereoTelemetryRef.current.corr : 1.0;
+      const widthPercent = { 'Estreito': '50%', 'Natural': '100%', 'Largo': '140%', 'Ultra': '180%' }[stereoWidth] || '100%';
+      
+      const lowCorr = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.lowCorr : 1.0;
+      const bassMonoSafe = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.bassMonoSafe : true;
+
+      const limiterGR = masterTelemetryRef.current ? masterTelemetryRef.current.limiterReductionDb : "0.0";
+      const peakDb = masterTelemetryRef.current ? masterTelemetryRef.current.peakDb : -12.0;
+
+      const extraHeadroomDb = (config.extraHeadroomDb || 0) * intensity;
+      const makeupDb = (config.maxMakeupDb || 0) * intensity;
+
+      const teleObj = {
+        name: "SoundPreset",
+        preset: presetName,
+        intensity: intensity.toFixed(2),
+        extraHeadroomDb: extraHeadroomDb.toFixed(1),
+        makeupDb: makeupDb.toFixed(1),
+        peakPostDb: (typeof peakDb === 'number' ? peakDb : -6.0).toFixed(1),
+        limiterGR: limiterGR,
+        width: widthPercent,
+        corr: (typeof corrVal === 'number' ? corrVal : 1.0).toFixed(2),
+        bassMonoSafe: bassMonoSafe,
+        status: "OK"
+      };
+
+      logToCMD("SoundPreset", JSON.stringify(teleObj), "success");
+    }, 800);
+  };
 
   // 8D Audio Motion System Loop
   useEffect(() => {
@@ -1073,6 +1182,28 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     updateIR();
   }, [spatialMode]);
 
+  const ensureAudioContextRunning = async (audioCtx) => {
+    if (!audioCtx) return false;
+    if (audioCtx.state === "suspended") {
+      try {
+        await audioCtx.resume();
+        lastResumeStatusRef.current = "OK";
+        logToCMD("DSP", "AudioContext retomado via helper", "success");
+        if (truePeakNodeRef.current && truePeakNodeRef.current.port) {
+          truePeakNodeRef.current.port.postMessage({ type: "reset" });
+          truePeakNodeRef.current.port.postMessage({ type: "state", isPlaying: isPlayingRef.current });
+        }
+      } catch (err) {
+        lastResumeStatusRef.current = "FAILED";
+        console.warn("[AUDIO] Failed to resume AudioContext:", err);
+        return false;
+      }
+    } else if (audioCtx.state === "running") {
+      lastResumeStatusRef.current = "OK";
+    }
+    return audioCtx.state === "running";
+  };
+
   const initAudioVisualizer = async () => {
     if (!audioRef.current || audioContextRef.current) return;
     try {
@@ -1087,13 +1218,35 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       analyserR.fftSize = 2048;
       
       const mediaSource = audioCtx.createMediaElementSource(audioRef.current);
+      
+      const seekGate = audioCtx.createGain();
+      seekGateRef.current = seekGate;
+      
       const source = audioCtx.createGain(); // Mixer bus
-      mediaSource.connect(source);
+      mediaSource.connect(seekGate);
+      seekGate.connect(source);
 
       // ReplayGain / Auto-Leveling Node
       const replayGainNode = audioCtx.createGain();
       replayGainNodeRef.current = replayGainNode;
-      source.connect(replayGainNode);
+
+      // Load and connect Source Quality Analyzer Node
+      let sourceQualityNode;
+      try {
+        await audioCtx.audioWorklet.addModule('/source-quality-processor.js?v=' + Date.now());
+        sourceQualityNode = new AudioWorkletNode(audioCtx, 'source-quality');
+        sourceQualityNode.port.onmessage = (e) => {
+          if (e.data.type === 'telemetry') {
+            sourceQualityTelemetryRef.current = e.data;
+          }
+        };
+        sourceQualityRef.current = sourceQualityNode;
+        source.connect(sourceQualityNode);
+        sourceQualityNode.connect(replayGainNode);
+      } catch (err) {
+        console.warn("Failed to load source-quality-processor, bypassing", err);
+        source.connect(replayGainNode);
+      }
 
       // QA Denormal Number Fix (Inject 1e-10 DC Noise Floor to prevent CPU denormal spikes)
       const ditherBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
@@ -1247,7 +1400,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
       await loadModule('/saturation-processor.js');
       const saturationNode = new AudioWorkletNode(audioCtx, 'saturation');
-      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: 0.35 });
+      saturationNode.port.postMessage({ active: enableSaturation, mode: satMode, drive: satDrive, mix: satMix, outputTrimDb: saturationOutputTrimDb });
       saturationRef.current = saturationNode;
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
@@ -1287,6 +1440,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const widthMap = { Estreito: 0.5, Natural: 1.0, Largo: 1.4, Ultra: 1.8 };
       const wVal = widthMap[stereoWidth] !== undefined ? widthMap[stereoWidth] : 1.0;
       mbWidthNode.port.postMessage({ width: wVal });
+      mbWidthNode.port.onmessage = (e) => {
+        if (e.data && e.data.type === 'telemetry') {
+          multibandStereoTelemetryRef.current = e.data;
+        }
+      };
       stereoWidthRef.current = mbWidthNode;
       
       // --- Harmonic Exciter (High-Pass Parallel Saturation com ADAA e 2x Oversampling) ---
@@ -1478,6 +1636,11 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       try {
         await loadModule('/master-out-processor.js');
         truePeakNode = new AudioWorkletNode(audioCtx, 'master-out');
+        truePeakNodeRef.current = truePeakNode;
+        truePeakNode.port.postMessage({
+          type: "state",
+          isPlaying: isPlayingRef.current
+        });
         truePeakNode.port.onmessage = (e) => {
           if (e.data.type === 'telemetry') {
             const data = e.data;
@@ -1487,20 +1650,162 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
             }
             const preGainDb = 20 * Math.log10(preGainRef.current ? preGainRef.current.gain.value : 1.0);
             
+            // Performance Governor actions (based on CPU latency and 10s sliding window underruns)
+            const cpuMs = data.avgCpuMs ? parseFloat(data.avgCpuMs) : 0;
+            const underruns = data.recentUnderruns ? parseInt(data.recentUnderruns) : 0;
+            let currentRisk = "LOW";
+            if (cpuMs > 2.5 || underruns > 5) {
+              currentRisk = "CRITICAL";
+            } else if (cpuMs > 1.8 || underruns > 1) {
+              currentRisk = "MEDIUM";
+            }
+            
+            const now = Date.now();
+            
+            // Histerese / Cooldown do Governor
+            if (currentRisk === "CRITICAL") {
+              lowStreakStartMsRef.current = 0; // Reseta timer de restauração
+              
+              if (!governorActiveRef.current) {
+                if (criticalStreakStartMsRef.current === 0) {
+                  criticalStreakStartMsRef.current = now;
+                }
+                // Se mantiver em CRITICAL por >= 500ms
+                if (now - criticalStreakStartMsRef.current >= 500) {
+                  governorActiveRef.current = true;
+                  lastGovernorChangeMsRef.current = now;
+                  
+                  if (enableTransientRef.current && !governorOverrideRef.current.transientBypassed) {
+                    if (transientRef.current && transientRef.current.port) {
+                      transientRef.current.port.postMessage({ active: false });
+                    }
+                    governorOverrideRef.current.transientBypassed = true;
+                  }
+                  if (enableAdaptiveEqRef.current && !governorOverrideRef.current.adaptiveEqBypassed) {
+                    if (adaptiveEqRef.current && adaptiveEqRef.current.port) {
+                      adaptiveEqRef.current.port.postMessage({ active: false });
+                    }
+                    governorOverrideRef.current.adaptiveEqBypassed = true;
+                  }
+                }
+              }
+              // Se o governor estiver ativo ou prestes a ficar, estabiliza o risco como CRITICAL
+              if (governorActiveRef.current) {
+                governorRiskRef.current = "CRITICAL";
+              }
+            } else {
+              criticalStreakStartMsRef.current = 0; // Reseta timer de sobrecarga
+              
+              if (governorActiveRef.current) {
+                if (currentRisk === "LOW") {
+                  if (lowStreakStartMsRef.current === 0) {
+                    lowStreakStartMsRef.current = now;
+                  }
+                  // Restaura após 3 segundos de calmaria (LOW) e pelo menos 3 segundos desde a última mudança
+                  if (now - lowStreakStartMsRef.current >= 3000 && now - lastGovernorChangeMsRef.current >= 3000) {
+                    governorActiveRef.current = false;
+                    lastGovernorChangeMsRef.current = now;
+                    
+                    if (governorOverrideRef.current.transientBypassed) {
+                      if (transientRef.current && transientRef.current.port) {
+                        transientRef.current.port.postMessage({ active: enableTransientRef.current });
+                      }
+                      governorOverrideRef.current.transientBypassed = false;
+                    }
+                    if (governorOverrideRef.current.adaptiveEqBypassed) {
+                      if (adaptiveEqRef.current && adaptiveEqRef.current.port) {
+                        adaptiveEqRef.current.port.postMessage({ active: enableAdaptiveEqRef.current });
+                      }
+                      governorOverrideRef.current.adaptiveEqBypassed = false;
+                    }
+                    governorRiskRef.current = "LOW";
+                  } else {
+                    // Mantém estado ativo e risco estável como CRITICAL durante a contagem regressiva
+                    governorRiskRef.current = "CRITICAL";
+                  }
+                } else {
+                  // Se subiu para MEDIUM, interrompe a contagem para voltar a LOW
+                  lowStreakStartMsRef.current = 0;
+                  governorRiskRef.current = "CRITICAL";
+                }
+              } else {
+                governorRiskRef.current = currentRisk; // LOW ou MEDIUM
+              }
+            }
+
+            const stabilizedRisk = governorRiskRef.current;
+            const uiFps = stabilizedRisk === "CRITICAL" ? 15 : (stabilizedRisk === "MEDIUM" ? 30 : 60);
+            
+            const actions = [];
+            if (governorOverrideRef.current.transientBypassed) actions.push("BYPASS_TRANSIENT");
+            if (governorOverrideRef.current.adaptiveEqBypassed) actions.push("BYPASS_ADAPTIVE_EQ");
+            if (stabilizedRisk === "CRITICAL" || stabilizedRisk === "MEDIUM") actions.push("REDUCE_VISUAL_REFRESH");
+
+            const restorePending = governorActiveRef.current && currentRisk === "LOW";
+
             const tele = {
               type: "telemetry",
               name: "MasterOut",
               headroomDb: preGainDb.toFixed(1),
               preGain: (preGainRef.current ? preGainRef.current.gain.value : 1.0).toFixed(3),
               peakDb: data.peakDb,
+              peakPreMasterDb: data.peakPreMasterDb,
               clipCount: data.clipCount,
               limiterReductionDb: (typeof reductionDb === 'number' ? Math.abs(reductionDb) : 0).toFixed(1),
-              volume: audioRef.current ? audioRef.current.volume.toFixed(2) : "1.00"
+              volume: audioRef.current ? audioRef.current.volume.toFixed(2) : "1.00",
+              safeBypassActive: masterTelemetryRef.current?.safeBypassActive || false,
+              avgCpuMs: data.avgCpuMs,
+              cpuLoad: data.cpuLoad,
+              underruns: data.underruns,
+              recentUnderruns: data.recentUnderruns || 0,
+              cpuTimingQuality: data.cpuTimingQuality || "HIGH RES",
+              governorActive: governorActiveRef.current,
+              governorRisk: stabilizedRisk,
+              uiFps: uiFps,
+              actions: actions,
+              restorePending: restorePending
             };
             
             masterTelemetryRef.current = tele;
-            
             logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success");
+
+            const nowLog = Date.now();
+            if (stabilizedRisk !== lastPerformanceGovernorRiskRef.current || nowLog - lastPerformanceGovernorLogTimeRef.current > 5000) {
+              lastPerformanceGovernorRiskRef.current = stabilizedRisk;
+              lastPerformanceGovernorLogTimeRef.current = nowLog;
+              
+              logToCMD("PerformanceGovernor", JSON.stringify({
+                type: "telemetry",
+                name: "PerformanceGovernor",
+                risk: stabilizedRisk,
+                avgCpuMs: cpuMs.toFixed(2),
+                budgetMs: "2.90",
+                cpuLoad: data.cpuLoad,
+                uiFps: uiFps,
+                actions: actions,
+                userSettingsPreserved: true,
+                restorePending: restorePending
+              }), stabilizedRisk === "CRITICAL" ? "error" : stabilizedRisk === "MEDIUM" ? "warning" : "success");
+            }
+          } else if (e.data.type === 'error') {
+            const tele = {
+              ...masterTelemetryRef.current,
+              type: "error",
+              name: "MasterOut",
+              safeBypassActive: e.data.safeBypassActive,
+              message: e.data.message
+            };
+            masterTelemetryRef.current = tele;
+            logToCMD("DSP-MasterOut-Error", JSON.stringify(tele), "error");
+          } else if (e.data.type === 'status' && e.data.status === 'RECOVERED') {
+            const tele = {
+              ...masterTelemetryRef.current,
+              type: "telemetry",
+              name: "MasterOut",
+              safeBypassActive: false
+            };
+            masterTelemetryRef.current = tele;
+            logToCMD("DSP-MasterOut-Status", "Processador MasterOut recuperado com sucesso.", "success");
           }
         };
         limiterNode.connect(truePeakNode);
@@ -1603,6 +1908,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       
       truePeakNode.connect(audioCtx.destination);
       
+      await ensureAudioContextRunning(audioCtx);
+      
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
       analyserLRef.current = analyserL;
@@ -1678,7 +1985,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         audioRef.current.src = currentSong.url;
         audioRef.current.volume = volume;
         audioRef.current.play()
-          .then(() => setIsPlaying(true))
+          .then(async () => {
+            setIsPlaying(true);
+            await ensureAudioContextRunning(audioContextRef.current);
+          })
           .catch(err => console.error('Stream playback error:', err));
       }
       // Set basic metadata from song object
@@ -1721,8 +2031,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       if (audioRef.current) {
         audioRef.current.src = url;
         audioRef.current.volume = volume;
+        if (truePeakNodeRef.current && truePeakNodeRef.current.port) {
+          truePeakNodeRef.current.port.postMessage({ type: "reset" });
+        }
         audioRef.current.play()
-          .then(() => setIsPlaying(true))
+          .then(async () => {
+            setIsPlaying(true);
+            await ensureAudioContextRunning(audioContextRef.current);
+          })
           .catch(err => {
             console.error("Playback error:", err);
           });
@@ -1730,11 +2046,17 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   }, [currentSong]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!audioRef.current) return;
-    initAudioVisualizer();
-    if (isPlaying) audioRef.current.pause();
-    else audioRef.current.play();
+    await initAudioVisualizer();
+    await ensureAudioContextRunning(audioContextRef.current);
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().then(async () => {
+        await ensureAudioContextRunning(audioContextRef.current);
+      }).catch(console.error);
+    }
     setIsPlaying(!isPlaying);
   };
 
@@ -1768,7 +2090,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       if (curr >= dur && dur > 0) {
         if (isLooping) {
           audioRef.current.currentTime = 0;
-          audioRef.current.play();
+          audioRef.current.play().then(async () => {
+            await ensureAudioContextRunning(audioContextRef.current);
+          }).catch(console.error);
         } else {
           setIsPlaying(false);
           if (onFinish) onFinish();
@@ -1777,9 +2101,63 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     }
   };
 
+  const resetAllDspStates = (reason = 'seek') => {
+    const resettableWorklets = [
+      transientRef, adaptiveEqRef, deesserRef, deharshRef, saturationRef,
+      submonoRef, masteringRef, spectralGlueRef, depthRef, panner8DRef,
+      stereoWidthRef, exciterNodeRef, stereoScopeRef, sourceQualityRef
+    ];
+    resettableWorklets.forEach(ref => {
+      if (ref.current?.port) ref.current.port.postMessage({ type: 'reset', reason });
+    });
+
+    // Native ConvolverNodes have no reset method. Reassigning the IR flushes
+    // the internal overlap/tail state before audio is allowed back through.
+    if (reverbNodeRef.current) {
+      try {
+        const impulseResponse = reverbNodeRef.current.buffer;
+        reverbNodeRef.current.buffer = null;
+        if (impulseResponse) reverbNodeRef.current.buffer = impulseResponse;
+      } catch (err) {
+        console.warn('Failed to reset convolver during seek', err);
+      }
+    }
+
+    if (truePeakNodeRef.current?.port) {
+      truePeakNodeRef.current.port.postMessage({ type: 'reset', reason });
+      truePeakNodeRef.current.port.postMessage({ type: 'resetClips', reason });
+    }
+  };
+
   const handleSeek = (e) => {
     const time = Number(e.target.value);
-    if (audioRef.current) {
+    if (!audioRef.current) return;
+
+    const audioCtx = audioContextRef.current;
+    if (audioCtx && seekGateRef.current) {
+      const now = audioCtx.currentTime;
+      seekGateRef.current.gain.cancelScheduledValues(now);
+      seekGateRef.current.gain.setValueAtTime(seekGateRef.current.gain.value, now);
+      seekGateRef.current.gain.setTargetAtTime(0.0001, now, 0.015);
+
+      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      seekTimeoutRef.current = setTimeout(() => {
+        resetAllDspStates('seek');
+        if (audioRef.current) {
+          audioRef.current.currentTime = time;
+          setProgress(time);
+        }
+        const now2 = audioCtx.currentTime;
+        const seekSafeGain = Math.pow(10, SEEK_TEMP_HEADROOM_DB / 20);
+        seekGateRef.current.gain.cancelScheduledValues(now2);
+        seekGateRef.current.gain.setValueAtTime(0.0001, now2);
+        seekGateRef.current.gain.setTargetAtTime(seekSafeGain, now2, 0.03);
+        // Hold the extra margin through the resumed transient, then return to unity.
+        seekGateRef.current.gain.setTargetAtTime(1.0, now2 + 0.08, 0.03);
+        seekTimeoutRef.current = null;
+      }, 60);
+    } else {
+      // Fallback
       audioRef.current.currentTime = time;
       setProgress(time);
     }
@@ -2407,6 +2785,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           autoEqAmount={autoEqAmount} setAutoEqAmount={setAutoEqAmount}
           abMode={abMode} setAbMode={setAbMode}
           abBlend={abBlend} setAbBlend={setAbBlend}
+          presetIntensity={presetIntensity}
+          setPresetIntensity={setPresetIntensity}
+          setPresetHeadroomConfig={setPresetHeadroomConfig}
+          onPresetApplied={handlePresetApplied}
         />
       )}
 
@@ -2414,6 +2796,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         <AudioDiagnosticsPanel
           isOpen={showDiagnostics}
           onClose={() => setShowDiagnostics(false)}
+          currentSong={currentSong}
           audioContextRef={audioContextRef}
           analyserRef={analyserRef}
           masterGainRef={masterGainRef}
@@ -2429,9 +2812,34 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           wetHighEqRef={wetHighEqRef}
           wetLpfRef={wetLpfRef}
           masterTelemetryRef={masterTelemetryRef}
+          lastResumeStatusRef={lastResumeStatusRef}
           analyserLRef={analyserLRef}
           analyserRRef={analyserRRef}
           stereoTelemetryRef={stereoTelemetryRef}
+          sourceQualityTelemetryRef={sourceQualityTelemetryRef}
+          multibandStereoTelemetryRef={multibandStereoTelemetryRef}
+          sourceQualityRef={sourceQualityRef}
+          setEqGains={setEqGains}
+          setStereoWidth={setStereoWidth}
+          setBassEnhancer={setBassEnhancer}
+          setBassIntensity={setBassIntensity}
+          setSpatialMode={setSpatialMode}
+          setReverbMix={setReverbMix}
+          setHarmonicExciter={setHarmonicExciter}
+          setEnableDeesser={setEnableDeesser}
+          setEnableDeharsh={setEnableDeharsh}
+          setEnableSaturation={setEnableSaturation}
+          setSatDrive={setSatDrive}
+          setSatMix={setSatMix}
+          setSaturationOutputTrimDb={setSaturationOutputTrimDb}
+          setSatMode={setSatMode}
+          setEnableStereoDepth={setEnableStereoDepth}
+          setStereoDepthAmount={setStereoDepthAmount}
+          setEnable8D={setEnable8D}
+          setEnableTransient={setEnableTransient}
+          truePeakNodeRef={truePeakNodeRef}
+          autoCalibProfile={autoCalibProfile}
+          setAutoCalibProfile={setAutoCalibProfile}
         />
       )}
     </>

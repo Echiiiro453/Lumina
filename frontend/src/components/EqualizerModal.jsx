@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { SlidersHorizontal, X, RefreshCw } from 'lucide-react';
+import { SlidersHorizontal, X, RefreshCw, Check } from 'lucide-react';
 import { t } from '../i18n';
 
 export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -16,15 +16,122 @@ export const EQ_PRESETS = {
 };
 
 const SOUND_PRESETS_DATA = [
-  { name: 'Fone Relaxado', desc: 'Crossfeed alto, sem fadiga, som natural.', key: 'Normal' },
-  { name: 'Cinema 8D', desc: 'Som rotacional ao redor da cabeça.', key: 'Electronic' },
-  { name: 'Concerto Ao Vivo', desc: 'Palco de rock com acustica de hall.', key: 'Rock' },
-  { name: 'Estudio Limpo', desc: 'Seco e preciso, sem coloracao.', key: 'Acoustic' },
-  { name: 'Catedral', desc: 'Reverb longo e grandioso.', key: 'Pop' },
-  { name: 'Lo-Fi', desc: 'Morno e vintage, agudos cortados.', key: 'Pop' },
-  { name: 'Bass Boost', desc: 'Sub-graves dominantes.', key: 'Bass Boost' },
-  { name: 'Voz Clara', desc: 'Presenca vocal destacada.', key: 'Vocal' }
+  { name: 'Som Limpo', desc: 'Quase transparente, só segurança/calibração.' },
+  { name: 'Fone Relaxado', desc: 'Crossfeed alto, sem fadiga, som natural.' },
+  { name: 'Cinema 8D', desc: 'Som rotacional ao redor da cabeça.' },
+  { name: 'Concerto Ao Vivo', desc: 'Palco de rock com acustica de hall.' },
+  { name: 'Estudio Limpo', desc: 'Seco e preciso, sem coloracao.' },
+  { name: 'Catedral', desc: 'Reverb longo e grandioso.' },
+  { name: 'Lo-Fi', desc: 'Morno e vintage, agudos cortados.' },
+  { name: 'Bass Boost', desc: 'Sub-graves dominantes.' },
+  { name: 'Voz Clara', desc: 'Presenca vocal destacada.' }
 ];
+
+export const SOUND_PRESETS = {
+  'Som Limpo': {
+    label: "Som Limpo",
+    desc: "Quase transparente, só segurança/calibração.",
+    eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    crossfeed: { active: false, gainDb: -12, delayMs: 0.25, lpfHz: 700 },
+    deharsh: false,
+    spatial: { active: false, wet: 0.0, motion: "Parado", speed: 0.5, radius: 2.0 },
+    depth: 0.0,
+    room: { preset: "Estúdio", material: "Madeira", wet: 0.0 },
+    bass: { active: false, amount: 0.0 },
+    saturation: { active: false, mode: "tube", drive: 0.0, mix: 0.0 },
+    extraHeadroomDb: -0.5,
+    maxMakeupDb: 0.5
+  },
+  'Fone Relaxado': {
+    label: "Fone Relaxado",
+    desc: "Crossfeed alto, sem fadiga, som natural.",
+    crossfeed: { active: true, gainDb: -9, delayMs: 0.35, lpfHz: 750 },
+    eq: [0, 0, 0, 0, 0, 0, 0, -1.0, -1.5, -2.0],
+    deharsh: true,
+    spatial: { active: false, wet: 0.0 },
+    room: { preset: "Estúdio", material: "Tecido", wet: 0.0 },
+    saturation: { active: true, mode: "tube", drive: 0.08, mix: 0.12 },
+    extraHeadroomDb: -0.5,
+    maxMakeupDb: 0.8
+  },
+  'Cinema 8D': {
+    label: "Cinema 8D",
+    desc: "Som rotacional ao redor da cabeça.",
+    spatial: { active: true, wet: 0.30, motion: "Elipse", speed: 0.25, radius: 1.6 },
+    depth: 0.55,
+    room: { preset: "Cinema", material: "Tecido", wet: 0.10 },
+    bass: { active: true, amount: 0.12 },
+    eq: [4, 3, 1, -2, -3, 0, 1, 3, 4, 5],
+    extraHeadroomDb: -2.0,
+    maxMakeupDb: 1.0
+  },
+  'Concerto Ao Vivo': {
+    label: "Concerto Ao Vivo",
+    desc: "Palco de rock com acustica de hall.",
+    room: { preset: "Concerto", material: "Madeira", wet: 0.14 },
+    depth: 0.45,
+    spatial: { active: true, wet: 0.16, motion: "Parado" },
+    saturation: { active: true, mode: "tube", drive: 0.12, mix: 0.20 },
+    eq: [5, 4, 3, 1, -1, -1, 0, 2, 3, 4],
+    extraHeadroomDb: -1.8,
+    maxMakeupDb: 0.8
+  },
+  'Estudio Limpo': {
+    label: "Estúdio Limpo",
+    desc: "Seco e preciso, sem coloracao.",
+    room: { preset: "Estúdio", material: "Tecido", wet: 0.04 },
+    spatial: { active: false, wet: 0.0 },
+    saturation: { active: false, drive: 0.0, mix: 0.0 },
+    bass: { active: false, amount: 0.0 },
+    eq: [2, 2, 1, 0, 0, 0, 1, 1, 2, 2],
+    deharsh: true,
+    extraHeadroomDb: -0.5,
+    maxMakeupDb: 0.5
+  },
+  'Catedral': {
+    label: "Catedral",
+    desc: "Reverb longo e grandioso.",
+    room: { preset: "Catedral", material: "Pedra", wet: 0.11, hpf: 220, lpf: 7000 },
+    depth: 0.70,
+    spatial: { active: true, wet: 0.18 },
+    eq: [-2, -1, 0, 2, 4, 4, 2, 0, -1, -2],
+    extraHeadroomDb: -2.5,
+    maxMakeupDb: 0.8
+  },
+  'Lo-Fi': {
+    label: "Lo-Fi",
+    desc: "Morno e vintage, agudos cortados.",
+    saturation: { active: true, mode: "tape", drive: 0.28, mix: 0.35 },
+    eq: [1.0, 0, 0, 0, 0, 0, 0, -3.0, -5.0, -6.0],
+    room: { preset: "Pequena", material: "Madeira", wet: 0.04 },
+    stereoWidth: 0.80,
+    extraHeadroomDb: -1.5,
+    maxMakeupDb: 0.8
+  },
+  'Bass Boost': {
+    label: "Bass Boost",
+    desc: "Sub-graves dominantes.",
+    bass: { active: true, amount: 0.35 },
+    eq: [2.5, 2.0, 1.0, 0, 0, 0, 0, 0, 0, 0],
+    subMono: true,
+    lowSideGain: 0.0,
+    saturation: { active: true, mode: "transformer", drive: 0.12, mix: 0.18 },
+    extraHeadroomDb: -2.5,
+    maxMakeupDb: 0.5
+  },
+  'Voz Clara': {
+    label: "Voz Clara",
+    desc: "Presenca vocal destacada.",
+    eq: [0, 0, 0, 0, 0, +1.0, +1.2, +0.6, 0, 0],
+    deesser: true,
+    deharsh: true,
+    room: { preset: "Estúdio", wet: 0.03 },
+    spatial: { active: false, wet: 0.0 },
+    saturation: { active: true, mode: "tube", drive: 0.10, mix: 0.15 },
+    extraHeadroomDb: -1.0,
+    maxMakeupDb: 0.8
+  }
+};
 
 const AMBIENTES_PADRAO = ['Pequena', 'Club', 'Concerto', 'Catedral', 'Estádio', 'Vastidão'];
 const AMBIENTES_IR = ['Geleira', 'Praia', 'Tubo', 'Squash', 'Túnel', 'Concreto', 'Tanque', 'Masmorra'];
@@ -136,6 +243,31 @@ function parseAutoEqTxt(text, meta = {}) {
   });
 }
 
+function M3Chip({ label, selected, onClick, disabled, icon: Icon, checkIcon = true, color = 'primary' }) {
+  const activeClasses = {
+    primary: 'bg-primary/20 border-primary text-primary shadow-sm shadow-primary/5 hover:bg-primary/30',
+    tertiary: 'bg-tertiary/20 border-tertiary text-tertiary shadow-sm shadow-tertiary/5 hover:bg-tertiary/30',
+    error: 'bg-error/20 border-error text-error shadow-sm shadow-error/5 hover:bg-error/30'
+  }[color] || 'bg-primary/20 border-primary text-primary shadow-sm shadow-primary/5 hover:bg-primary/30';
+
+  return (
+    <motion.button
+      whileTap={disabled ? {} : { scale: 0.95 }}
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all duration-150 ${
+        selected
+          ? activeClasses
+          : 'bg-surface-container-high/40 border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'
+      } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+      {selected && checkIcon && <Check size={11} className="stroke-[3]" />}
+      {Icon && <Icon size={11} />}
+      <span>{label}</span>
+    </motion.button>
+  );
+}
+
 export function EqualizerModal({ 
   isOpen, onClose, gains, setGains, preset, setPreset, 
   playbackRate, setPlaybackRate, preservesPitch, setPreservesPitch, reverbMix, setReverbMix,
@@ -168,7 +300,10 @@ export function EqualizerModal({
   autoEqAmount, setAutoEqAmount,
   
   abMode, setAbMode,
-  abBlend, setAbBlend
+  abBlend, setAbBlend,
+  
+  presetIntensity, setPresetIntensity,
+  setPresetHeadroomConfig, onPresetApplied
 }) {
   const [activeTab, setActiveTab] = useState('eq');
 
@@ -194,63 +329,98 @@ export function EqualizerModal({
     reader.readAsText(file);
   };
 
-  const applyPreset = (presetName) => {
-    // Reset all enhancements to a default state first
-    if (setEnableCrossfeed) setEnableCrossfeed(false);
-    if (setEnable8D) setEnable8D(false);
-    if (setReverbMix) setReverbMix(0.0);
-    if (setBassEnhancer) setBassEnhancer(false);
-    if (setEnableSaturation) setEnableSaturation(false);
-    if (setStereoWidth) setStereoWidth('Natural');
-    if (setMotionMode) setMotionMode('Parado');
+  const applyPreset = (presetName, intensity = presetIntensity) => {
+    const config = SOUND_PRESETS[presetName];
+    if (!config) {
+      // Fallback for standard EQ presets
+      if (EQ_PRESETS[presetName]) {
+        if (setGains) setGains(EQ_PRESETS[presetName]);
+        if (setPreset) setPreset(presetName);
+      }
+      return;
+    }
 
-    if (presetName === 'Fone Relaxado') {
-      if (setEnableCrossfeed) setEnableCrossfeed(true);
-      if (setCrossfeedAmount) setCrossfeedAmount(0.7);
-      if (setGains) setGains(EQ_PRESETS['Normal']);
-      if (setPreset) setPreset('Normal');
-    } else if (presetName === 'Cinema 8D') {
-      if (setEnable8D) setEnable8D(true);
-      if (setMotionMode) setMotionMode('Elipse');
-      if (setMotionSpeed) setMotionSpeed(0.6);
-      if (setMotionRadius) setMotionRadius(3.5);
-      if (setGains) setGains(EQ_PRESETS['Electronic']);
-      if (setPreset) setPreset('Electronic');
-    } else if (presetName === 'Concerto Ao Vivo') {
-      if (setReverbMix) setReverbMix(0.35);
-      if (setSpatialMode) setSpatialMode('Club');
-      if (setStereoWidth) setStereoWidth('Largo');
-      if (setGains) setGains(EQ_PRESETS['Rock']);
-      if (setPreset) setPreset('Rock');
-    } else if (presetName === 'Estudio Limpo') {
+    if (setPreset) setPreset(presetName);
+
+    // Apply EQ scaled by intensity
+    if (config.eq && setGains) {
+      const scaledGains = config.eq.map(g => g * intensity);
+      setGains(scaledGains);
+    }
+
+    // Apply Crossfeed scaled by intensity
+    if (setEnableCrossfeed) setEnableCrossfeed(!!config.crossfeed?.active);
+    if (config.crossfeed?.active) {
+      if (setCrossfeedAmount) {
+        setCrossfeedAmount(Math.min(1.0, 0.7 * intensity));
+      }
+    }
+
+    // Apply Spatial 8D / Stereo Width / Stereo Depth
+    if (setEnable8D) setEnable8D(!!config.spatial?.active);
+    if (config.spatial?.active) {
+      if (setMotionMode) setMotionMode(config.spatial.motion || 'Parado');
+      if (setMotionSpeed) setMotionSpeed((config.spatial.speed || 0.5) * intensity);
+      if (setMotionRadius) setMotionRadius((config.spatial.radius || 2.0) * intensity);
+    } else {
+      if (setMotionMode) setMotionMode('Parado');
+    }
+
+    if (setEnableStereoDepth) setEnableStereoDepth(config.depth > 0);
+    if (config.depth !== undefined && setStereoDepthAmount) {
+      setStereoDepthAmount(config.depth * intensity);
+    }
+
+    if (config.stereoWidth !== undefined) {
+      if (setStereoWidth) {
+        const wVal = config.stereoWidth;
+        if (wVal <= 0.8) setStereoWidth('Estreito');
+        else if (wVal >= 1.4) setStereoWidth('Ultra');
+        else if (wVal >= 1.1) setStereoWidth('Largo');
+        else setStereoWidth('Natural');
+      }
+    } else {
       if (setStereoWidth) setStereoWidth('Natural');
-      if (setGains) setGains(EQ_PRESETS['Acoustic']);
-      if (setPreset) setPreset('Acoustic');
-    } else if (presetName === 'Catedral') {
-      if (setReverbMix) setReverbMix(0.65);
-      if (setSpatialMode) setSpatialMode('Catedral');
-      if (setStereoWidth) setStereoWidth('Ultra');
-      if (setGains) setGains(EQ_PRESETS['Pop']);
-      if (setPreset) setPreset('Pop');
-    } else if (presetName === 'Lo-Fi') {
-      if (setEnableSaturation) setEnableSaturation(true);
-      if (setSatDrive) setSatDrive(0.8);
-      if (setSatMode) setSatMode('tape');
-      if (setStereoWidth) setStereoWidth('Estreito');
-      if (setGains) setGains([-2, -1, 0, 1, 2, 2, 0, -2, -5, -8]);
-      if (setPreset) setPreset('Custom');
-    } else if (presetName === 'Bass Boost') {
-      if (setBassEnhancer) setBassEnhancer(true);
-      if (setBassIntensity) setBassIntensity(80);
-      if (setGains) setGains(EQ_PRESETS['Bass Boost']);
-      if (setPreset) setPreset('Bass Boost');
-    } else if (presetName === 'Voz Clara') {
-      if (setStereoWidth) setStereoWidth('Natural');
-      if (setGains) setGains(EQ_PRESETS['Vocal']);
-      if (setPreset) setPreset('Vocal');
-    } else if (EQ_PRESETS[presetName]) {
-      if (setGains) setGains(EQ_PRESETS[presetName]);
-      if (setPreset) setPreset(presetName);
+    }
+
+    // Apply Reverb / Room
+    if (config.room) {
+      if (setReverbMix) setReverbMix(config.room.wet * intensity);
+      if (setSpatialMode) setSpatialMode(config.room.preset);
+      if (setRoomMaterial) setRoomMaterial(config.room.material || 'Madeira');
+    } else {
+      if (setReverbMix) setReverbMix(0.0);
+    }
+
+    // Apply Bass / SubMono
+    if (setBassEnhancer) setBassEnhancer(!!config.bass?.active);
+    if (config.bass?.active && setBassIntensity) {
+      setBassIntensity(Math.min(100, Math.round(50 + (config.bass.amount * 100) * intensity)));
+    }
+    if (setEnableSubmono) setEnableSubmono(!!config.subMono);
+
+    // Apply Saturation
+    if (setEnableSaturation) setEnableSaturation(!!config.saturation?.active);
+    if (config.saturation?.active) {
+      if (setSatMode) setSatMode(config.saturation.mode || 'tube');
+      if (setSatDrive) setSatDrive(config.saturation.drive * intensity);
+    }
+
+    // Apply Deharsh / Deesser
+    if (setEnableDeharsh) setEnableDeharsh(!!config.deharsh);
+    if (setEnableDeesser) setEnableDeesser(!!config.deesser);
+
+    // Headroom config & Telemetry
+    if (setPresetHeadroomConfig) {
+      setPresetHeadroomConfig({
+        extraHeadroomDb: config.extraHeadroomDb || 0,
+        maxMakeupDb: config.maxMakeupDb || 0,
+        intensity
+      });
+    }
+
+    if (onPresetApplied) {
+      onPresetApplied(presetName, intensity, config);
     }
   };
 
@@ -334,6 +504,33 @@ export function EqualizerModal({
                     </div>
                     <span className="text-xs text-[var(--md-sys-color-on-surface-variant)]">Configura toda a chain de uma vez</span>
                   </div>
+
+                  {/* Intensidade do Preset */}
+                  <div className="mb-6 p-4 bg-[var(--md-sys-color-surface-container-low)] rounded-[20px] border border-[var(--md-sys-color-outline-variant)]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--md-sys-color-on-surface)] block">Intensidade do Preset</span>
+                      <span className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] block">Modifica o ganho efetivo de todos os efeitos do preset</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: 'Leve (60%)', value: 0.6 },
+                        { label: 'Normal', value: 1.0 },
+                        { label: 'Forte (130%)', value: 1.3 }
+                      ].map((item) => (
+                        <M3Chip
+                          key={item.value}
+                          label={item.label}
+                          selected={presetIntensity === item.value}
+                          onClick={() => {
+                            if (setPresetIntensity) setPresetIntensity(item.value);
+                            if (preset && SOUND_PRESETS[preset]) {
+                              applyPreset(preset, item.value);
+                            }
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {SOUND_PRESETS_DATA.map((p) => (
@@ -399,15 +596,14 @@ export function EqualizerModal({
                           <label className="text-xs font-bold text-[var(--md-sys-color-on-surface)]">Intensidade da Correção</label>
                           <span className="text-xs font-mono text-[var(--md-sys-color-primary)] font-bold">{Math.round((autoEqAmount || 0) * 100)}%</span>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-wrap gap-2">
                           {[ {label: 'Leve', val: 0.5}, {label: 'Natural', val: 0.75}, {label: 'Completa', val: 1.0} ].map(amt => (
-                            <button
+                            <M3Chip
                               key={amt.label}
+                              label={amt.label}
+                              selected={autoEqAmount === amt.val}
                               onClick={() => setAutoEqAmount && setAutoEqAmount(amt.val)}
-                              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${autoEqAmount === amt.val ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)]/10'}`}
-                            >
-                              {amt.label}
-                            </button>
+                            />
                           ))}
                         </div>
                       </div>
@@ -455,19 +651,19 @@ export function EqualizerModal({
                     </div>
                   </div>
 
-                  <div className="flex space-x-2 mb-6">
+                  <div className="flex flex-wrap gap-2 mb-6">
                     {[
                       { id: 'RAW', label: 'Raw' },
                       { id: 'CALIBRATED', label: 'Ref (Calibrada)' },
                       { id: 'PROCESSED', label: 'Mix (DSP)' }
                     ].map(mode => (
-                      <button
+                      <M3Chip
                         key={mode.id}
+                        label={mode.label}
+                        selected={abMode === mode.id}
                         onClick={() => setAbMode && setAbMode(mode.id)}
-                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${abMode === mode.id ? 'bg-[var(--md-sys-color-tertiary)] text-[var(--md-sys-color-on-tertiary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)]/10'}`}
-                      >
-                        {mode.label}
-                      </button>
+                        color="tertiary"
+                      />
                     ))}
                   </div>
 
@@ -490,25 +686,23 @@ export function EqualizerModal({
                 {/* Presets Rápidos */}
                 <div>
                   <h3 className="text-sm font-bold text-[var(--md-sys-color-on-surface)] mb-4">Efeitos Rápidos</h3>
-                  <div className="flex space-x-4">
-                    <button
+                  <div className="flex flex-wrap gap-2">
+                    <M3Chip
+                      label="Nightcore"
                       onClick={() => { if(setPlaybackRate) setPlaybackRate(1.25); if(setPreservesPitch) setPreservesPitch(false); if(setReverbMix) setReverbMix(0.0); }}
-                      className="flex-1 py-4 bg-[var(--md-sys-color-tertiary-container)] hover:bg-[var(--md-sys-color-tertiary-container)]/85 text-[var(--md-sys-color-on-tertiary-container)] border border-[var(--md-sys-color-tertiary)]/20 rounded-2xl font-bold transition-all shadow-sm"
-                    >
-                      Nightcore
-                    </button>
-                    <button
+                      selected={playbackRate === 1.25 && !preservesPitch}
+                    />
+                    <M3Chip
+                      label="Slowed + Reverb"
                       onClick={() => { if(setPlaybackRate) setPlaybackRate(0.85); if(setPreservesPitch) setPreservesPitch(false); if(setReverbMix) setReverbMix(0.5); }}
-                      className="flex-1 py-4 bg-[var(--md-sys-color-primary-container)] hover:bg-[var(--md-sys-color-primary-container)]/85 text-[var(--md-sys-color-on-primary-container)] border border-[var(--md-sys-color-primary)]/20 rounded-2xl font-bold transition-all shadow-sm"
-                    >
-                      Slowed + Reverb
-                    </button>
-                    <button
+                      selected={playbackRate === 0.85 && !preservesPitch && reverbMix === 0.5}
+                    />
+                    <M3Chip
+                      label="Resetar"
                       onClick={() => { if(setPlaybackRate) setPlaybackRate(1.0); if(setPreservesPitch) setPreservesPitch(true); if(setReverbMix) setReverbMix(0.0); }}
-                      className="flex-1 py-4 bg-transparent text-[var(--md-sys-color-on-surface)] font-bold transition-colors hover:bg-white/5 rounded-2xl border border-[var(--md-sys-color-outline-variant)]/20"
-                    >
-                      Resetar
-                    </button>
+                      selected={playbackRate === 1.0 && preservesPitch && reverbMix === 0.0}
+                      color="tertiary"
+                    />
                   </div>
                 </div>
 
@@ -563,9 +757,14 @@ export function EqualizerModal({
                     {/* Largura Estereo */}
                     <div>
                       <label className="text-sm font-bold text-[var(--md-sys-color-on-surface)] mb-4 block">Largura Estereo</label>
-                      <div className="flex space-x-2">
+                      <div className="flex flex-wrap gap-2">
                         {['Estreito', 'Natural', 'Largo', 'Ultra'].map(w => (
-                          <button key={w} onClick={() => setStereoWidth(w)} className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${w === stereoWidth ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>{w}</button>
+                          <M3Chip
+                            key={w}
+                            label={w}
+                            selected={w === stereoWidth}
+                            onClick={() => setStereoWidth(w)}
+                          />
                         ))}
                       </div>
                     </div>
@@ -573,12 +772,14 @@ export function EqualizerModal({
                     {/* Harmonic Exciter */}
                     <div>
                       <label className="text-sm font-bold text-[var(--md-sys-color-on-surface)] mb-4 block">Harmonic Exciter</label>
-                      <div className="flex space-x-2">
+                      <div className="flex flex-wrap gap-2">
                         {['Off', 'Sutil', 'Medio', 'Forte'].map(w => (
-                          <button 
-                            key={w} 
+                          <M3Chip
+                            key={w}
+                            label={w}
+                            selected={w === getExciterLevel()}
                             onClick={() => setExciterLevel(w)}
-                            className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${w === getExciterLevel() ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>{w}</button>
+                          />
                         ))}
                       </div>
                       <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mt-2">Adiciona harmonicos sutis. Melhora brilho em MP3.</p>
@@ -600,15 +801,17 @@ export function EqualizerModal({
                       </div>
                       
                       {enableReplayGain && (
-                        <div className="flex space-x-2 mt-2">
+                        <div className="flex flex-wrap gap-2 mt-2">
                           {[
                             {name: 'Seguro', lufs: '-18 LUFS'}, {name: 'Normal', lufs: '-16 LUFS'},
                             {name: 'Alto', lufs: '-14 LUFS'}, {name: 'Noite', lufs: '-20 LUFS'}
                           ].map(w => (
-                            <button key={w.name} onClick={() => setLufsMode(w.name)} className={`flex-1 py-2 flex flex-col items-center justify-center rounded-xl transition-all ${w.name === lufsMode ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>
-                              <span className="text-xs font-bold">{w.name}</span>
-                              <span className="text-[9px] opacity-80">{w.lufs}</span>
-                            </button>
+                            <M3Chip
+                              key={w.name}
+                              label={`${w.name} (${w.lufs})`}
+                              selected={w.name === lufsMode}
+                              onClick={() => setLufsMode(w.name)}
+                            />
                           ))}
                         </div>
                       )}
@@ -784,11 +987,14 @@ export function EqualizerModal({
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">AMBIENTES PADRÃO</h3>
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex flex-wrap gap-2">
                       {AMBIENTES_PADRAO.map((amb) => (
-                        <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
-                          {amb}
-                        </button>
+                        <M3Chip
+                          key={amb}
+                          label={amb}
+                          selected={amb === spatialMode}
+                          onClick={() => setSpatialMode && setSpatialMode(amb)}
+                        />
                       ))}
                     </div>
                   </div>
@@ -798,9 +1004,13 @@ export function EqualizerModal({
                     <p className="text-[10px] text-[var(--md-sys-color-error)] mb-3 opacity-80 font-bold">Aviso: Modo experimental. Estes ambientes possuem assinaturas acústicas extremas.</p>
                     <div className="flex flex-wrap gap-2">
                       {AMBIENTES_IR.map((amb) => (
-                        <button key={amb} onClick={() => setSpatialMode && setSpatialMode(amb)} className={`px-4 py-1.5 rounded-full border text-[11px] font-bold transition-all ${amb === spatialMode ? 'border-[var(--md-sys-color-error)] text-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface-variant)]'}`}>
-                          {amb}
-                        </button>
+                        <M3Chip
+                          key={amb}
+                          label={amb}
+                          selected={amb === spatialMode}
+                          onClick={() => setSpatialMode && setSpatialMode(amb)}
+                          color="error"
+                        />
                       ))}
                     </div>
                   </div>
@@ -808,11 +1018,14 @@ export function EqualizerModal({
 
                 <div className="pt-6">
                   <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-4">MATERIAL ACÚSTICO</h3>
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-2">
                     {MATERIAIS.map((mat) => (
-                      <button key={mat} onClick={() => setRoomMaterial && setRoomMaterial(mat)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${mat === roomMaterial ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
-                        {mat}
-                      </button>
+                      <M3Chip
+                        key={mat}
+                        label={mat}
+                        selected={mat === roomMaterial}
+                        onClick={() => setRoomMaterial && setRoomMaterial(mat)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -820,11 +1033,14 @@ export function EqualizerModal({
                 <div className="pt-2 border-b border-[var(--md-sys-color-outline-variant)]/10 pb-8">
                   <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-1">PERFIL POR GENERO</h3>
                   <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mb-4">Configura EQ + espacial para o gênero da música.</p>
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-2">
                     {GENEROS.map((gen) => (
-                      <button key={gen} onClick={() => setGenreProfile(gen)} className={`px-6 py-2 rounded-full border text-xs font-bold transition-all ${gen === genreProfile ? 'border-[var(--md-sys-color-primary)] text-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary)]/10 shadow-sm' : 'border-[var(--md-sys-color-outline-variant)]/30 hover:bg-white/5 text-[var(--md-sys-color-on-surface)]'}`}>
-                        {gen}
-                      </button>
+                      <M3Chip
+                        key={gen}
+                        label={gen}
+                        selected={gen === genreProfile}
+                        onClick={() => setGenreProfile && setGenreProfile(gen)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -834,11 +1050,14 @@ export function EqualizerModal({
                   <h3 className="text-xs font-bold text-[var(--md-sys-color-on-surface)] uppercase tracking-wider mb-1">MOTION SYSTEM</h3>
                   <p className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] mb-4">Move o som em trajetórias ao redor da cabeça. Requer Áudio Espacial ativo.</p>
                   
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {MOTION_MODES.map((mode) => (
-                      <button key={mode} onClick={() => setMotionMode(mode)} className={`py-3 px-1 rounded-xl text-xs font-bold transition-all text-center ${mode === motionMode ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] shadow-md' : 'bg-[var(--md-sys-color-surface-container-low)] border border-[var(--md-sys-color-outline-variant)]/10 text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-highest)]/80'}`}>
-                        {mode}
-                      </button>
+                      <M3Chip
+                        key={mode}
+                        label={mode}
+                        selected={mode === motionMode}
+                        onClick={() => setMotionMode && setMotionMode(mode)}
+                      />
                     ))}
                   </div>
 
