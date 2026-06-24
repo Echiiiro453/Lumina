@@ -7,14 +7,11 @@ import { t } from '../i18n';
 export default function StudioModal({ isOpen, onClose, apiUrl }) {
   const [filePath, setFilePath] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
   const [library, setLibrary] = useState([]);
   const [loadingLib, setLoadingLib] = useState(false);
   
   const [studioJobs, setStudioJobs] = useState({});
-  const [isPollingQueue, setIsPollingQueue] = useState(false);
 
-  const [installJobId, setInstallJobId] = useState(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState("");
   const [showInstallButton, setShowInstallButton] = useState(false);
@@ -82,9 +79,6 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
     }
   };
 
-  const [jobId, setJobId] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState("");
   const [quality, setQuality] = useState("fast");
   const [aiModel, setAiModel] = useState('htdemucs_ft');
   const [twoStems, setTwoStems] = useState(true);
@@ -119,7 +113,6 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
       const endpoint = forcePython ? `${apiUrl}/api/studio/install_full` : `${apiUrl}/api/studio/install`;
       const res = await axios.post(endpoint);
       const currentJobId = res.data.job_id;
-      setInstallJobId(currentJobId);
 
       const pollInterval = setInterval(async () => {
         try {
@@ -131,7 +124,6 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
           if (data.status === "success" || data.status === "error") {
             clearInterval(pollInterval);
             setIsInstalling(false);
-            setInstallJobId(null);
             if (data.status === "error") {
                alert("Erro na instalação: " + data.message);
                setShowInstallButton(true);

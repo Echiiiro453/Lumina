@@ -1280,39 +1280,6 @@ def is_python_installed():
 
 
 
-class ConvertRequest(BaseModel):
-    input_path: str
-    output_format: str
-
-@app.post("/api/choose_file")
-def api_choose_file():
-    import tkinter as tk
-    from tkinter import filedialog
-    import threading
-
-    result = {"file": ""}
-    
-    def open_dialog():
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        file_path = filedialog.askopenfilename(
-            title="Selecione um arquivo de mídia",
-            filetypes=[("Arquivos de Mídia", "*.mp4;*.mp3;*.wav;*.flac;*.m4a;*.ogg;*.aac;*.webm;*.mkv"), ("Todos os Arquivos", "*.*")]
-        )
-        result["file"] = file_path
-        root.destroy()
-        
-    # Execute in a new thread to avoid blocking issues or main thread errors
-    t = threading.Thread(target=open_dialog)
-    t.start()
-    t.join()
-    
-    if result["file"]:
-        return {"status": "ok", "file": result["file"]}
-    else:
-        return {"status": "cancelled", "message": "Nenhum arquivo selecionado."}
-
 @app.post("/api/choose_lrc_file")
 def api_choose_lrc_file():
     import tkinter as tk
@@ -1344,73 +1311,6 @@ def api_choose_lrc_file():
     t.join()
     
     return result
-
-@app.post("/api/convert")
-def api_convert(req: ConvertRequest):
-    import subprocess
-    import time
-    from utils import get_downloads_dir
-    
-    if not os.path.exists(req.input_path):
-        raise HTTPException(status_code=400, detail="Arquivo de entrada não encontrado.")
-        
-    valid_formats = ['mp3', 'wav', 'flac', 'm4a', 'ogg']
-    if req.output_format.lower() not in valid_formats:
-        raise HTTPException(status_code=400, detail="Formato de saída inválido.")
-        
-    filename = os.path.basename(req.input_path)
-    name_only = os.path.splitext(filename)[0]
-    
-    downloads_dir = get_downloads_dir()
-    converted_dir = os.path.join(downloads_dir, "converted")
-    os.makedirs(converted_dir, exist_ok=True)
-    
-    output_path = os.path.join(converted_dir, f"{name_only}_converted.{req.output_format.lower()}")
-    
-    # Se o arquivo já existir, adiciona timestamp
-    if os.path.exists(output_path):
-        output_path = os.path.join(converted_dir, f"{name_only}_converted_{int(time.time())}.{req.output_format.lower()}")
-    # Build ffmpeg command
-    cmd = [
-        'ffmpeg',
-        '-y', # overwrite
-        '-i', req.input_path
-    ]
-    
-    # Format specific options
-    if req.output_format.lower() == 'mp3':
-        cmd.extend(['-codec:a', 'libmp3lame', '-q:a', '2'])
-    elif req.output_format.lower() == 'm4a':
-        cmd.extend(['-codec:a', 'aac', '-b:a', '192k'])
-    elif req.output_format.lower() == 'ogg':
-        cmd.extend(['-codec:a', 'libvorbis', '-q:a', '4'])
-        
-    cmd.append(output_path)
-    
-    CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-    
-    try:
-        process = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=CREATE_NO_WINDOW,
-            text=True
-        )
-        
-        if process.returncode != 0:
-            print(f"FFmpeg error: {process.stderr}")
-            raise HTTPException(status_code=500, detail="Erro na conversão do arquivo pelo FFmpeg.")
-            
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="FFmpeg não encontrado no sistema.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-    return {
-        "status": "success",
-        "output_path": output_path
-    }
 
 @app.post("/api/upload_wallpaper")
 async def upload_wallpaper(file: UploadFile = File(...)):

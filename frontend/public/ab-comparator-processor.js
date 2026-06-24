@@ -19,7 +19,7 @@ class ABComparatorProcessor extends AudioWorkletProcessor {
     return [];
   }
 
-  process(inputs, outputs, parameters) {
+  process(inputs, outputs) {
     // inputs[0]: Reference (Calibrated)
     // inputs[1]: Processed (Full DSP Chain)
     // inputs[2]: Raw (Source direct, optional if we route it)
@@ -29,9 +29,6 @@ class ABComparatorProcessor extends AudioWorkletProcessor {
     const rawInput = inputs[2] || [];
     
     const output = outputs[0];
-    
-    // Fallback to empty channels if disconnected
-    const channels = Math.max(refInput.length, procInput.length, output.length, 1);
     
     for (let c = 0; c < output.length; c++) {
       const refChannel = refInput[c] || new Float32Array(output[c].length);

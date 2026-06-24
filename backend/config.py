@@ -1,5 +1,5 @@
 """
-Global configurations and constants for AppMusica Backend.
+Global configurations and constants for the Lumina backend.
 """
 
 # Impersonation target for curl_cffi requests to avoid bot detection

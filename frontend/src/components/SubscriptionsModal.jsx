@@ -24,9 +24,10 @@ export function SubscriptionsModal({ isOpen, onClose }) {
   };
 
   useEffect(() => {
-    if (isOpen) {
-      fetchSubs();
-    }
+    if (!isOpen) return;
+
+    const timeoutId = setTimeout(fetchSubs, 0);
+    return () => clearTimeout(timeoutId);
   }, [isOpen]);
 
   const removeSub = async (id) => {

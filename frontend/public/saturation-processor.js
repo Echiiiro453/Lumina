@@ -189,7 +189,6 @@ class SaturationProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    const wet = this.mix, dry = 1 - wet;
     const chs = input.length;
 
     // Lazy initialization of state variables
@@ -431,23 +430,12 @@ class SaturationProcessor extends AudioWorkletProcessor {
 
 
         const d1 = xFeed - x1;
-        const d2 = x1 - x2;
-        const d3 = xFeed - x2;
-
         const absD1 = Math.abs(d1);
-        const absD2 = Math.abs(d2);
-        const absD3 = Math.abs(d3);
-
-        // Acceleration / Curvature parameter
-        const absD2x = Math.abs(xFeed - 2 * x1 + x2);
 
         // Scale-Normalized Adaptive Thresholds with relaxed tolerance to prevent division by zero instability
         const env = Math.abs(xFeed) + Math.abs(x1) + 1e-6;
-        const envPrev = Math.abs(x1) + Math.abs(x2) + 1e-6;
 
         const eps1 = 1e-3 * env + 1e-5;
-        const eps2 = 1e-3 * envPrev + 1e-5;
-        const eps3 = 1e-3 * env + 1e-3 * absD2x + 1e-5;
 
         // 3. Pre-evaluate antiderivative levels (Unified F2)
         const F2_x = this._F2_mode(xFeed);

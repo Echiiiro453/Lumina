@@ -1,19 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SlidersHorizontal, X, RefreshCw, Check } from 'lucide-react';
-import { t } from '../i18n';
-
-export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-
-export const EQ_PRESETS = {
-  'Normal': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  'Bass Boost': [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
-  'Rock': [5, 4, 3, 1, -1, -1, 0, 2, 3, 4],
-  'Pop': [-2, -1, 0, 2, 4, 4, 2, 0, -1, -2],
-  'Vocal': [-2, -2, 0, 2, 4, 4, 3, 1, 0, -2],
-  'Electronic': [4, 3, 1, -2, -3, 0, 1, 3, 4, 5],
-  'Acoustic': [2, 2, 1, 0, 0, 0, 1, 1, 2, 2]
-};
+import { EQ_BANDS, EQ_PRESETS } from '../utils/equalizerConfig';
 
 const SOUND_PRESETS_DATA = [
   { name: 'Som Limpo', desc: 'Quase transparente, só segurança/calibração.' },
@@ -27,7 +15,7 @@ const SOUND_PRESETS_DATA = [
   { name: 'Voz Clara', desc: 'Presenca vocal destacada.' }
 ];
 
-export const SOUND_PRESETS = {
+const SOUND_PRESETS = {
   'Som Limpo': {
     label: "Som Limpo",
     desc: "Quase transparente, só segurança/calibração.",
@@ -172,7 +160,7 @@ function computeAutoEqCurveMaxBoostDb(filters) {
       if (db > maxBoostDb) maxBoostDb = db;
     }
     return Math.max(0, maxBoostDb);
-  } catch (e) {
+  } catch {
     return Math.max(0, ...filters.map(f => f.gainDb));
   }
 }
@@ -271,10 +259,10 @@ function M3Chip({ label, selected, onClick, disabled, icon: Icon, checkIcon = tr
 export function EqualizerModal({ 
   isOpen, onClose, gains, setGains, preset, setPreset, 
   playbackRate, setPlaybackRate, preservesPitch, setPreservesPitch, reverbMix, setReverbMix,
-  enableTransient, setEnableTransient, transientAttack, setTransientAttack, transientSustain, setTransientSustain,
+  enableTransient, setEnableTransient,
   enableAdaptiveEq, setEnableAdaptiveEq, enableDeesser, setEnableDeesser, enableDeharsh, setEnableDeharsh,
-  enableSaturation, setEnableSaturation, satDrive, setSatDrive, satMode, setSatMode,
-  enableSubmono, setEnableSubmono, enableCrossfeed, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
+  enableSaturation, setEnableSaturation, setSatDrive, setSatMode,
+  enableSubmono, setEnableSubmono, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
   
   enable8D, setEnable8D,
   motionMode, setMotionMode,
@@ -290,8 +278,6 @@ export function EqualizerModal({
   genreProfile, setGenreProfile,
   harmonicExciter, setHarmonicExciter,
   enablePhaseRotation, setEnablePhaseRotation,
-  enableSpectralGlue, setEnableSpectralGlue,
-  spectralGlueThreshold, setSpectralGlueThreshold,
   enableStereoDepth, setEnableStereoDepth,
   stereoDepthAmount, setStereoDepthAmount,
   enableReplayGain, setEnableReplayGain,
