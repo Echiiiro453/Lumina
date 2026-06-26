@@ -391,6 +391,7 @@ function App() {
   const [consecutiveDownloads, setConsecutiveDownloads] = useState([]);
   const consecutiveDownloadsRef = React.useRef([]);
   const frozenDownloadOptionsRef = React.useRef(null);
+  const activeDownloadUrlRef = React.useRef(null);
 
   const replaceConsecutiveDownloads = (updater) => {
     const previous = consecutiveDownloadsRef.current;
@@ -399,9 +400,43 @@ function App() {
     setConsecutiveDownloads(next);
   };
 
+  const prepareConsecutiveDownloadPreview = (downloadUrl) => {
+    activeDownloadUrlRef.current = downloadUrl;
+    setUrl(downloadUrl);
+    setDownloadInfo(null);
+    setStatus(null);
+    setMessage('');
+    setStep('downloading');
+    setProgress({ percent: 0, status: 'queued' });
+    setMetadata({
+      url: downloadUrl,
+      title: 'Carregando informações do próximo vídeo...',
+      thumbnail: null
+    });
+  };
+
   const submitConsecutiveDownload = async (downloadUrl) => {
     const options = frozenDownloadOptionsRef.current;
     if (!options) throw new Error('Configuração inicial do download não encontrada.');
+
+    // The download endpoint only creates the job; it does not replace the
+    // metadata shown by the confirmation/download card. Clear the previous
+    // video's data immediately and resolve the next video's title/cover in
+    // parallel so a slow /info response does not delay the actual download.
+    prepareConsecutiveDownloadPreview(downloadUrl);
+
+    axios.post(getApiUrl('/info'), { url: downloadUrl })
+      .then(infoResponse => {
+        if (activeDownloadUrlRef.current === downloadUrl) {
+          setMetadata({ ...infoResponse.data, url: infoResponse.data.url || downloadUrl });
+        }
+      })
+      .catch(error => {
+        // Metadata is visual-only here. The download may still succeed through
+        // a backend fallback, so do not abort the consecutive queue.
+        console.warn('Falha ao atualizar metadados do download consecutivo:', error);
+      });
+
     const response = await axios.post(getApiUrl('/download'), { ...options, url: downloadUrl });
     setProgress({ percent: 0, status: 'queued' });
     setCurrentJobId(response.data.job_id);
@@ -427,7 +462,11 @@ function App() {
     else addToast('Download concluído; iniciando o próximo link.', 'success');
     submitConsecutiveDownload(next.url).catch(error => {
       addToast(error.response?.data?.detail || 'Falha ao iniciar o próximo download.', 'error');
-      startNextConsecutiveDownload(true);
+      if (!startNextConsecutiveDownload(true)) {
+        setMessage(error.response?.data?.detail || 'Falha ao iniciar o próximo download.');
+        setStatus('error');
+        setStep('confirm');
+      }
     });
     return true;
   };
@@ -477,6 +516,15 @@ function App() {
     if (step === 'downloading' && currentJobId) {
       const job = globalJobs[currentJobId];
       if (job) {
+        const liveTitle = job.title || job.filename;
+        if (liveTitle) {
+          setMetadata(prev => ({
+            ...(prev || {}),
+            url: prev?.url || activeDownloadUrlRef.current,
+            title: liveTitle,
+            thumbnail: prev?.thumbnail || job.thumbnail || job.cover_path || null
+          }));
+        }
         if (job.progress !== undefined) {
           setProgress({ 
             percent: job.progress, 
@@ -1035,14 +1083,17 @@ function App() {
   };
 
   const loadVideoDetails = async (videoUrl) => {
+    activeDownloadUrlRef.current = videoUrl;
     setLoading(true);
     setMetadata(null); // Force clear previous data
     setMessage('');
     console.log("📥 Loading Info for:", videoUrl);
     try {
       const response = await axios.post(getApiUrl('/info'), { url: videoUrl });
-      setMetadata(response.data);
-      setStep('confirm');
+      if (activeDownloadUrlRef.current === videoUrl) {
+        setMetadata({ ...response.data, url: response.data.url || videoUrl });
+        setStep('confirm');
+      }
     } catch (error) {
       console.error(error);
       setStatus('error');
@@ -1113,6 +1164,7 @@ function App() {
       organize_by_playlist: organizeByPlaylist,
       sponsorblock_enabled: sponsorblockEnabled
     };
+    activeDownloadUrlRef.current = metadata.url;
 
     try {
       // 1. Enqueue Task (agora /download também retorna job_id imediatamente)
@@ -1139,6 +1191,7 @@ function App() {
 
   // ... (reset function needs to clear progress too)
   const reset = () => {
+    activeDownloadUrlRef.current = null;
     setStep('search');
     setUrl('');
     setMetadata(null);
@@ -2026,7 +2079,7 @@ function App() {
                     </div>
                     <div className="flex gap-2">
                       <input value={nextDownloadInput} onChange={(event) => setNextDownloadInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addConsecutiveDownload(); } }} placeholder="Cole o próximo link aqui..." className="min-w-0 flex-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-4 py-2 text-sm text-on-surface outline-none focus:border-primary" />
-                      <button onClick={addConsecutiveDownload} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary/90"><Plus size={17} /></button>
+                      <button onClick={addConsecutiveDownload} className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary/90"><Plus size={17} /><span>Adicionar</span></button>
                     </div>
                     {consecutiveDownloads.length > 0 && <div className="space-y-2">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-primary">A seguir ({consecutiveDownloads.length})</p>
