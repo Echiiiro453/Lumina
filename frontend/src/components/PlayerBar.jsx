@@ -23,9 +23,6 @@ export const logToCMD = (source, message, level = "info", cooldownMs = 1000) => 
 };
 // ---------------------------------------------------
 
-const widthGains = { 'Estreito': 0.5, 'Natural': 1.0, 'Largo': 1.5, 'Ultra': 2.2 };
-
-
 const createReverbIR = (audioCtx, duration, decay) => {
   const sampleRate = audioCtx.sampleRate;
   const length = sampleRate * duration;
@@ -78,7 +75,7 @@ const loadIR = async (audioCtx, preset) => {
     if (!response.ok) throw new Error("IR file not found");
     const arrayBuffer = await response.arrayBuffer();
     buffer = await audioCtx.decodeAudioData(arrayBuffer);
-  } catch (e) {
+  } catch {
     let duration = 3.5, decay = 2.5;
     switch (preset) {
       case 'Pequena': duration = 0.8; decay = 5.0; break;
@@ -102,20 +99,6 @@ const loadIR = async (audioCtx, preset) => {
   return buffer;
 };
 
-
-const makeExciterCurve = (amount) => {
-  const n = 256;
-  const curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / (n - 1) - 1;
-    if (amount === 0) {
-      curve[i] = x;
-    } else {
-      curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
-    }
-  }
-  return curve;
-};
 
 function analyzeTrackLoudness(audioBuffer) {
   const EPS = 1e-12;
@@ -191,7 +174,7 @@ function computeAutoEqCurveMaxBoostDb(filters) {
       if (db > maxBoostDb) maxBoostDb = db;
     }
     return Math.max(0, maxBoostDb);
-  } catch (e) {
+  } catch {
     return Math.max(0, ...filters.map(f => f.gainDb));
   }
 }
@@ -320,7 +303,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const masteringRef = useRef(null);
   const lufsRef = useRef(null);
-  const [lufsValue, setLufsValue] = useState(null);
+  const [, setLufsValue] = useState(null);
 
   // --- Missing / New DSP States & Refs ---
   const [enableReplayGain, setEnableReplayGain] = useState(true);
@@ -396,7 +379,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const limiterRef = useRef(null);
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
-  const crossfadeTimeoutRef = useRef(null);
   const masterTelemetryRef = useRef(null);
   const lastResumeStatusRef = useRef("PENDING");
   const lastPerformanceGovernorLogTimeRef = useRef(0);
@@ -405,6 +387,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const governorActiveRef = useRef(false);
   const criticalStreakStartMsRef = useRef(0);
   const lowStreakStartMsRef = useRef(0);
+  const lastGovernorChangeMsRef = useRef(0);
   const governorRiskRef = useRef("BAIXO");
   const enableTransientRef = useRef(false);
   const enableAdaptiveEqRef = useRef(false);
@@ -614,7 +597,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const scrobbledRef = useRef(false);
   
   const [artistPhoto, setArtistPhoto] = useState(null);
-  const [showVisualizer, setShowVisualizer] = useState(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const canvasRef = useRef(null);
@@ -626,18 +608,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     try {
       const saved = localStorage.getItem('appmusica_eq_bands');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch { /* Ignore malformed saved EQ data and use the default preset. */ }
     return EQ_PRESETS['Normal'] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   });
   const eqFiltersRef = useRef([]);
-  const handleGainChange = (bandIndex, value) => {
-    setEqGains(prev => {
-      const newGains = [...prev];
-      newGains[bandIndex] = value;
-      return newGains;
-    });
-    setEqPreset('Personalizado');
-  };
 
   useEffect(() => {
     localStorage.setItem('appmusica_eq_preset', eqPreset);
@@ -1083,7 +1057,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const corrVal = stereoTelemetryRef.current ? stereoTelemetryRef.current.corr : 1.0;
       const widthPercent = { 'Estreito': '50%', 'Natural': '100%', 'Largo': '140%', 'Ultra': '180%' }[stereoWidth] || '100%';
       
-      const lowCorr = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.lowCorr : 1.0;
       const bassMonoSafe = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.bassMonoSafe : true;
 
       const limiterGR = masterTelemetryRef.current ? masterTelemetryRef.current.limiterReductionDb : "0.0";
@@ -1391,7 +1364,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deesser-processor.js');
       const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
       deesserNode.port.postMessage({ active: enableDeesser });
-      deesserNode.port.onmessage = (e) => {
+      deesserNode.port.onmessage = () => {
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deesserRef.current = deesserNode;
@@ -1401,7 +1374,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deharsh-processor.js');
       const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
       deharshNode.port.postMessage({ active: enableDeharsh });
-      deharshNode.port.onmessage = (e) => {
+      deharshNode.port.onmessage = () => {
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deharshRef.current = deharshNode;
@@ -1415,7 +1388,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
 
-      saturationNode.port.onmessage = (e) => {
+      saturationNode.port.onmessage = () => {
         // if (e.data.type === 'telemetry') {
         //   logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         // }
@@ -1424,7 +1397,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
-      submonoNode.port.onmessage = (e) => {
+      submonoNode.port.onmessage = () => {
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       submonoRef.current = submonoNode;
@@ -1472,7 +1445,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/depth-processor.js');
         const depthNode = new AudioWorkletNode(audioCtx, 'depth');
         depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
-        depthNode.port.onmessage = (e) => {
+        depthNode.port.onmessage = () => {
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         depthRef.current = depthNode;
@@ -1499,7 +1472,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
            preDelayMs: 18, 
            rt60: 3.5
         });
-        roomTelemetryNode.port.onmessage = (e) => {
+        roomTelemetryNode.port.onmessage = () => {
           // se quiser debugar a sala, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -1579,7 +1552,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/lumina-mastering.js');
         const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
         masteringNode.port.postMessage({ enablePhaseRotation });
-        masteringNode.port.onmessage = (e) => {
+        masteringNode.port.onmessage = () => {
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         masteringRef.current = masteringNode;
@@ -1622,7 +1595,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const wetParam = panner8DNode.parameters.get('wet');
         if (wetParam) wetParam.value = enable8D ? 0.20 : 0.0;
         
-        panner8DNode.port.onmessage = (e) => {
+        panner8DNode.port.onmessage = () => {
           // se quiser debugar o panner, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -2008,7 +1981,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         coverUrl: currentSong.thumbnail || '',
       });
     } else if (currentSong.file) {
-      const urlPath = currentSong.file.split(/[\\\/]/).map(encodeURIComponent).join('/');
+      const urlPath = currentSong.file.split(/[\\/]/).map(encodeURIComponent).join('/');
       const url = `${baseUrl}/downloads/${urlPath}`;
       
       // Fetch embedded lyrics & cover from backend
@@ -2093,7 +2066,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
               body: JSON.stringify({ artist, title })
             }).catch(()=>{});
           }
-        } catch(e) {}
+        } catch { /* Scrobbling must never interrupt playback. */ }
       }
 
 
@@ -2241,8 +2214,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const lyricsContainerRef = useRef(null);
 
-  if (!currentSong) return null;
-
   useEffect(() => {
     if (activeLineIndex !== -1 && lyricsContainerRef.current && isExpanded) {
       const container = lyricsContainerRef.current;
@@ -2252,6 +2223,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       }
     }
   }, [activeLineIndex, isExpanded]);
+
+  if (!currentSong) return null;
 
   const openExternal = async () => {
     if (!currentSong?.file) return;

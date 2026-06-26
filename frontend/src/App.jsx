@@ -59,7 +59,6 @@ function App() {
   const [quality, setQuality] = useState('320'); // Default: Ultra MP3
   const [subtitle, setSubtitle] = useState('none');
   const [mode, setMode] = useState('audio'); // 'audio' | 'video'
-  const [playlist, setPlaylist] = useState(false); // Baixar playlist inteira?
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(null); // 'success', 'error'
   const [message, setMessage] = useState('');
@@ -148,7 +147,7 @@ function App() {
   }, [resolvedWallpaper]);
 
   // Advanced Toasts
-  const [toasts, setToasts] = useState([]);
+  const [, setToasts] = useState([]);
 
   const addToast = (title, type = 'info', action = null) => {
     const id = Date.now() + Math.random();
@@ -169,7 +168,7 @@ function App() {
   const [pitch, setPitch] = useState(0); // -12 to +12
 
   // Language state – changing this triggers full re-render so translations update
-  const [lang, setLang] = useState(getLanguage());
+  const [, setLang] = useState(getLanguage());
 
   const handleLanguageChange = (code) => {
     setLanguage(code);
@@ -201,34 +200,16 @@ function App() {
   const [showShazamModal, setShowShazamModal] = useState(false);
   const [showMobileSync, setShowMobileSync] = useState(false);
   const [showSubscriptionsModal, setShowSubscriptionsModal] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuTimeoutRef = React.useRef(null);
-
-  const handleMenuEnter = () => {
-    if (menuTimeoutRef.current) {
-      clearTimeout(menuTimeoutRef.current);
-      menuTimeoutRef.current = null;
-    }
-    setIsMenuOpen(true);
-  };
-
-  const handleMenuLeave = () => {
-    menuTimeoutRef.current = setTimeout(() => {
-      setIsMenuOpen(false);
-    }, 500); // Tolerância de 500ms
-  };
-
   // Playlist Manager
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [playlistVideos, setPlaylistVideos] = useState([]);
   const [selectedVideos, setSelectedVideos] = useState(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
-  const [resolvedUrl, setResolvedUrl] = useState('');
+  const [resolvedUrl] = useState('');
 
   // Integrated Search
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Queue System (Batch Download)
   const [queue, setQueue] = useState([]);
@@ -259,7 +240,7 @@ function App() {
 
   // Ctrl+V / Cmd+V: Auto-paste URL from clipboard into the search bar
   useEffect(() => {
-    const handlePaste = async (e) => {
+    const handlePaste = async () => {
       const active = document.activeElement;
       const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
       if (isTyping) return; // Don't interfere when user is typing in a field
@@ -275,7 +256,7 @@ function App() {
           if (detected === 'audio') setMode('audio');
           addToast('🔗 URL colada automaticamente!', 'success');
         }
-      } catch (err) {
+      } catch {
         // Clipboard permission denied — fail silently
       }
     };
@@ -373,7 +354,7 @@ function App() {
       } else if (manual) {
         alert("Você já está usando a versão mais recente!");
       }
-    } catch (e) {
+    } catch {
       if (manual) alert("Erro ao checar atualizações.");
     } finally {
       setIsCheckingUpdate(false);
@@ -498,7 +479,7 @@ function App() {
             return;
           }
           setGlobalJobs(data);
-        } catch (e) {}
+        } catch { /* Ignore malformed WebSocket payloads. */ }
       };
       ws.onclose = () => {
         reconnectTimer = setTimeout(connectWs, 3000);
@@ -699,16 +680,6 @@ function App() {
     setSelectedVideos(newSelected);
   };
 
-  const selectAllVideos = () => {
-    // Select ONLY pending
-    const pendingIndices = new Set(
-      playlistVideos
-        .filter(v => v.status !== 'downloaded')
-        .map(v => v.index)
-    );
-    setSelectedVideos(pendingIndices);
-  };
-
   const deselectAllVideos = () => {
     setSelectedVideos(new Set());
   };
@@ -832,7 +803,7 @@ function App() {
         return;
       }
       addToast(`Reiniciando download: ${video.title}`, 'info');
-      const res = await axios.post(getApiUrl('/download/retry'), {
+      await axios.post(getApiUrl('/download/retry'), {
         playlist_id: playlistId,
         video_id: video.id
       });
