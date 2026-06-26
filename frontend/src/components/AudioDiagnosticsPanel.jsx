@@ -47,20 +47,17 @@ export function AudioDiagnosticsPanel({
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
   eqFiltersRef, wetHpfRef, wetMidEqRef, wetHighEqRef, wetLpfRef, masterTelemetryRef,
-  analyserLRef, analyserRRef, stereoTelemetryRef,
+  stereoTelemetryRef,
   sourceQualityTelemetryRef, multibandStereoTelemetryRef, sourceQualityRef,
   setEqGains, setStereoWidth, setBassEnhancer, setBassIntensity, setSpatialMode,
   setReverbMix, setHarmonicExciter, setEnableDeesser, setEnableDeharsh,
   setEnableSaturation, setSatDrive, setSatMix, setSaturationOutputTrimDb, setSatMode, setEnableStereoDepth,
   setStereoDepthAmount, setEnable8D, setEnableTransient, truePeakNodeRef,
   lastResumeStatusRef,
-  autoCalibProfile,
   setAutoCalibProfile
 }) {
-  const canvasRef = useRef(null);
   const curveCanvasRef = useRef(null);
   const rafRef = useRef(null);
-  const curveRafRef = useRef(null);
   const [nodes, setNodes] = useState([]);
   const [lufs, setLufs] = useState(null);
   const [reduction, setReduction] = useState(null);
@@ -487,7 +484,6 @@ export function AudioDiagnosticsPanel({
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
         const barW = (W / data.length) * 2.5;
-        let x = 0;
         for (let i = 0; i < data.length; i++) {
           // Map index to logarithmic frequency scale to match the Damping Curve
           const freq = analyser.context.sampleRate / 2 * (i / data.length);
@@ -1011,13 +1007,10 @@ export function AudioDiagnosticsPanel({
                   const riskInfo = getDropoutRisk(avgCpuMsVal, recentUnderrunsVal);
                   
                   // Color coding for CPU Load & Block Time
-                  let loadColor = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
                   let loadProgressColor = 'bg-emerald-500';
                   if (cpuLoadVal > 80) {
-                    loadColor = 'text-rose-400 bg-rose-500/10 border-rose-500/20';
                     loadProgressColor = 'bg-rose-500';
                   } else if (cpuLoadVal > 40) {
-                    loadColor = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
                     loadProgressColor = 'bg-amber-500';
                   }
 

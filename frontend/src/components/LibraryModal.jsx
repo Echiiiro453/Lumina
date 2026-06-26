@@ -27,7 +27,7 @@ export function LibraryModal({ isOpen, onClose, getApiUrl, onPlaySong, onEditTag
   const [artistName, setArtistName] = useState('');
   const [artistLoading, setArtistLoading] = useState(false);
   const [artistError, setArtistError] = useState('');
-  const [artistDownloading, setArtistDownloading] = useState(false);
+  const [artistDownloading] = useState(false);
 
   // ── Search history (localStorage) ──
   const [streamHistory, setStreamHistory] = useState(() => {
@@ -94,7 +94,7 @@ export function LibraryModal({ isOpen, onClose, getApiUrl, onPlaySong, onEditTag
       try {
         const studioRes = await axios.get(getApiUrl('/api/studio_library'));
         if (studioRes.data?.library) setStudioLibrary(studioRes.data.library);
-      } catch (e) { /* optional */ }
+      } catch { /* optional */ }
     } catch (e) {
       console.error('Failed to load library:', e);
     } finally {
@@ -103,7 +103,7 @@ export function LibraryModal({ isOpen, onClose, getApiUrl, onPlaySong, onEditTag
   };
 
   const openFolder = async () => {
-    try { await axios.post(getApiUrl('/open_folder')); } catch (e) { /* ignore */ }
+    try { await axios.post(getApiUrl('/open_folder')); } catch { /* ignore */ }
   };
 
   const toggleFavorite = useCallback(async (song, e) => {
@@ -556,9 +556,6 @@ export function LibraryModal({ isOpen, onClose, getApiUrl, onPlaySong, onEditTag
       )}
     </div>
   );
-
-  const _getArtistNameInternal = (song) => {
-  };
 
   const groupedByArtist = useMemo(() => {
     const groups = {};

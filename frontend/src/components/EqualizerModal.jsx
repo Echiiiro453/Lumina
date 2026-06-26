@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SlidersHorizontal, X, RefreshCw, Check } from 'lucide-react';
-import { t } from '../i18n';
 
 export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
@@ -172,7 +171,7 @@ function computeAutoEqCurveMaxBoostDb(filters) {
       if (db > maxBoostDb) maxBoostDb = db;
     }
     return Math.max(0, maxBoostDb);
-  } catch (e) {
+  } catch {
     return Math.max(0, ...filters.map(f => f.gainDb));
   }
 }
@@ -271,10 +270,10 @@ function M3Chip({ label, selected, onClick, disabled, icon: Icon, checkIcon = tr
 export function EqualizerModal({ 
   isOpen, onClose, gains, setGains, preset, setPreset, 
   playbackRate, setPlaybackRate, preservesPitch, setPreservesPitch, reverbMix, setReverbMix,
-  enableTransient, setEnableTransient, transientAttack, setTransientAttack, transientSustain, setTransientSustain,
+  enableTransient, setEnableTransient,
   enableAdaptiveEq, setEnableAdaptiveEq, enableDeesser, setEnableDeesser, enableDeharsh, setEnableDeharsh,
-  enableSaturation, setEnableSaturation, satDrive, setSatDrive, satMode, setSatMode,
-  enableSubmono, setEnableSubmono, enableCrossfeed, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
+  enableSaturation, setEnableSaturation, setSatDrive, setSatMode,
+  enableSubmono, setEnableSubmono, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
   
   enable8D, setEnable8D,
   motionMode, setMotionMode,
@@ -290,8 +289,6 @@ export function EqualizerModal({
   genreProfile, setGenreProfile,
   harmonicExciter, setHarmonicExciter,
   enablePhaseRotation, setEnablePhaseRotation,
-  enableSpectralGlue, setEnableSpectralGlue,
-  spectralGlueThreshold, setSpectralGlueThreshold,
   enableStereoDepth, setEnableStereoDepth,
   stereoDepthAmount, setStereoDepthAmount,
   enableReplayGain, setEnableReplayGain,
