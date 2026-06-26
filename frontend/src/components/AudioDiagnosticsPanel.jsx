@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu, ShieldAlert, Play, Sliders, FileSearch, ShieldCheck, AlertCircle, FileAudio, RefreshCw } from 'lucide-react';
 import { TEST_SUITES, runAudioTest, runDspSoakTest } from '../utils/audioTortureRunner';
 import { AUTO_CALIBRATION_PROFILES, calculateAnticipativeHeadroom } from '../audio/presets/autoCalibrationProfiles';
+import { createHealthSnapshot, createHealthSoakReport, downloadJsonReport, evaluateHealthAlerts } from '../utils/healthSnapshot';
 import { logToCMD } from './PlayerBar';
 
 /**
@@ -42,7 +43,7 @@ function M3Chip({ label, selected, onClick, disabled, icon: Icon, checkIcon = tr
 
 export function AudioDiagnosticsPanel({
   isOpen, onClose,
-  currentSong,
+  currentSong, isPlaying, audioRef,
   audioContextRef, analyserRef, masterGainRef,
   crossfeedRef, stereoWidthRef, exciterNodeRef,
   limiterRef, occlusionFilterRef, workletAnchorRef,
@@ -158,6 +159,147 @@ export function AudioDiagnosticsPanel({
   const [soakResult, setSoakResult] = useState(null);
   const [isSoakTesting, setIsSoakTesting] = useState(false);
   const [soakProgress, setSoakProgress] = useState('');
+  const [healthSnapshot, setHealthSnapshot] = useState(null);
+  const [healthSoak, setHealthSoak] = useState(null);
+  const healthSoakTimerRef = useRef(null);
+  const healthSoakBaselineRef = useRef(null);
+  const healthSoakContextRef = useRef({});
+
+  useEffect(() => {
+    healthSoakContextRef.current = {
+      currentSong,
+      isPlaying,
+      audioRef,
+      audioContextRef,
+      masterTelemetryRef,
+      stereoTelemetryRef,
+      sourceQualityTelemetryRef,
+      multibandStereoTelemetryRef,
+      uiFps
+    };
+  }, [
+    currentSong,
+    isPlaying,
+    audioRef,
+    audioContextRef,
+    masterTelemetryRef,
+    stereoTelemetryRef,
+    sourceQualityTelemetryRef,
+    multibandStereoTelemetryRef,
+    uiFps
+  ]);
+
+  useEffect(() => () => {
+    if (healthSoakTimerRef.current) {
+      clearInterval(healthSoakTimerRef.current);
+    }
+  }, []);
+
+  const captureHealthSnapshot = () => createHealthSnapshot({
+    currentSong,
+    isPlaying,
+    audioRef,
+    audioContextRef,
+    masterTelemetryRef,
+    stereoTelemetryRef,
+    sourceQualityTelemetryRef,
+    multibandStereoTelemetryRef,
+    uiFps,
+    activeJobs: null,
+    activeDownloads: null
+  });
+
+  const handleCaptureHealthSnapshot = () => {
+    const snapshot = captureHealthSnapshot();
+    setHealthSnapshot(snapshot);
+  };
+
+  const handleExportHealthSnapshot = () => {
+    if (!healthSnapshot) return;
+    downloadJsonReport(healthSnapshot, 'player-health-snapshot');
+  };
+
+  const stopHealthSoak = (cancelled = false) => {
+    if (healthSoakTimerRef.current) {
+      clearInterval(healthSoakTimerRef.current);
+      healthSoakTimerRef.current = null;
+    }
+
+    setHealthSoak(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        running: false,
+        cancelled,
+        endedAt: new Date().toISOString()
+      };
+    });
+  };
+
+  const handleStartHealthSoak = (durationMin) => {
+    if (healthSoakTimerRef.current) {
+      clearInterval(healthSoakTimerRef.current);
+    }
+
+    const startedAt = new Date().toISOString();
+    const firstSnapshot = captureHealthSnapshot();
+    healthSoakBaselineRef.current = firstSnapshot;
+    setHealthSoak({
+      running: true,
+      cancelled: false,
+      durationMin,
+      startedAt,
+      endedAt: null,
+      snapshots: [firstSnapshot],
+      alerts: [],
+      lastRisk: firstSnapshot.performance.governorRisk || 'UNKNOWN'
+    });
+
+    healthSoakTimerRef.current = setInterval(() => {
+      setHealthSoak(prev => {
+        if (!prev?.running) return prev;
+
+        const ctx = healthSoakContextRef.current;
+        const snapshot = createHealthSnapshot({
+          ...ctx,
+          activeJobs: null,
+          activeDownloads: null
+        });
+        const previousSnapshot = prev.snapshots[prev.snapshots.length - 1] || null;
+        const newAlerts = evaluateHealthAlerts(snapshot, healthSoakBaselineRef.current, previousSnapshot);
+        const elapsedMs = Date.now() - Date.parse(prev.startedAt);
+        const shouldFinish = elapsedMs >= durationMin * 60 * 1000;
+        const snapshots = [...prev.snapshots, snapshot].slice(-durationMin);
+
+        if (shouldFinish && healthSoakTimerRef.current) {
+          clearInterval(healthSoakTimerRef.current);
+          healthSoakTimerRef.current = null;
+        }
+
+        return {
+          ...prev,
+          running: !shouldFinish,
+          endedAt: shouldFinish ? new Date().toISOString() : prev.endedAt,
+          snapshots,
+          alerts: [...prev.alerts, ...newAlerts].slice(-120),
+          lastRisk: snapshot.performance.governorRisk || 'UNKNOWN'
+        };
+      });
+    }, 60000);
+  };
+
+  const handleExportHealthSoak = () => {
+    if (!healthSoak) return;
+    const report = createHealthSoakReport({
+      durationMin: healthSoak.durationMin,
+      startedAt: healthSoak.startedAt,
+      endedAt: healthSoak.endedAt || new Date().toISOString(),
+      cancelled: healthSoak.cancelled,
+      snapshots: healthSoak.snapshots,
+      alerts: healthSoak.alerts
+    });
+    downloadJsonReport(report, 'player-health-soak-test');
+  };
 
   const handleRunSoakTest = async (durationMin) => {
     setIsSoakTesting(true);
@@ -1836,6 +1978,119 @@ export function AudioDiagnosticsPanel({
                           {res.error && <p className="text-xs text-error mt-1">{res.error}</p>}
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Health Snapshot / Lightweight Soak Test */}
+                <div className="mt-6 border-t border-outline-variant/20 pt-6">
+                  <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2 flex items-center gap-1">
+                    <ShieldCheck size={10} /> Health Snapshot / Soak Test Leve
+                  </p>
+                  <p className="text-[10px] text-on-surface-variant/70 mb-4 leading-relaxed">
+                    Captura snapshots sanitizados do player durante uso real. Nao altera DSP, presets, limiter, EQ ou cadeia de audio.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <M3Chip
+                      label="Capturar Snapshot"
+                      icon={FileAudio}
+                      onClick={handleCaptureHealthSnapshot}
+                      checkIcon={false}
+                    />
+                    <M3Chip
+                      label="Exportar Snapshot"
+                      icon={FileSearch}
+                      onClick={handleExportHealthSnapshot}
+                      disabled={!healthSnapshot}
+                      checkIcon={false}
+                    />
+                  </div>
+
+                  {healthSnapshot && (
+                    <div className="p-3 rounded-xl border border-outline-variant/20 bg-surface-container-high/30 mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-on-surface">Ultimo snapshot</span>
+                        <span className="text-[10px] font-mono text-on-surface-variant">{new Date(healthSnapshot.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                        <div><span className="opacity-60">Play:</span> {healthSnapshot.player.isPlaying ? 'sim' : 'nao'}</div>
+                        <div><span className="opacity-60">Ctx:</span> {healthSnapshot.player.audioContextState || 'null'}</div>
+                        <div><span className="opacity-60">Peak:</span> {healthSnapshot.audio.peakDb ?? 'null'} dB</div>
+                        <div><span className="opacity-60">Clips:</span> {healthSnapshot.audio.clipCount ?? 'null'}</div>
+                        <div><span className="opacity-60">GR:</span> {healthSnapshot.audio.limiterReductionDb ?? 'null'} dB</div>
+                        <div><span className="opacity-60">Risk:</span> {healthSnapshot.performance.governorRisk || 'null'}</div>
+                        <div><span className="opacity-60">FPS:</span> {healthSnapshot.performance.uiFps ?? 'null'}</div>
+                        <div><span className="opacity-60">Arquivo:</span> {healthSnapshot.song.file.fileName || 'null'}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {[5, 15, 30, 60].map((durationMin) => (
+                      <M3Chip
+                        key={durationMin}
+                        label={`${durationMin} min`}
+                        icon={Activity}
+                        onClick={() => handleStartHealthSoak(durationMin)}
+                        disabled={!!healthSoak?.running}
+                        checkIcon={false}
+                      />
+                    ))}
+                    <M3Chip
+                      label="Cancelar"
+                      icon={AlertCircle}
+                      onClick={() => stopHealthSoak(true)}
+                      disabled={!healthSoak?.running}
+                      checkIcon={false}
+                    />
+                    <M3Chip
+                      label="Exportar Soak"
+                      icon={FileSearch}
+                      onClick={handleExportHealthSoak}
+                      disabled={!healthSoak?.snapshots?.length}
+                      checkIcon={false}
+                    />
+                  </div>
+
+                  {healthSoak && (
+                    <div className={`p-4 rounded-xl border space-y-3 ${
+                      healthSoak.alerts.some(a => a.severity === 'error')
+                        ? 'border-error/25 bg-error/5'
+                        : healthSoak.alerts.length
+                          ? 'border-amber-500/25 bg-amber-500/5'
+                          : 'border-primary/20 bg-primary/5'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-on-surface">
+                            {healthSoak.running ? 'Rodando' : (healthSoak.cancelled ? 'Cancelado' : 'Concluido')} ({healthSoak.durationMin}m)
+                          </p>
+                          <p className="text-[10px] text-on-surface-variant">
+                            {healthSoak.snapshots.length} snapshot(s) coletado(s) | risco atual: {healthSoak.lastRisk || 'UNKNOWN'}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          healthSoak.alerts.some(a => a.severity === 'error')
+                            ? 'bg-error/20 text-error'
+                            : healthSoak.alerts.length
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-primary/20 text-primary'
+                        }`}>
+                          {healthSoak.alerts.some(a => a.severity === 'error') ? 'FAIL' : (healthSoak.alerts.length ? 'WARN' : 'OK')}
+                        </span>
+                      </div>
+
+                      {healthSoak.alerts.length > 0 && (
+                        <div className="space-y-1">
+                          {healthSoak.alerts.slice(-5).map((alert, idx) => (
+                            <div key={`${alert.type}-${idx}`} className="text-[10px] text-on-surface-variant flex items-start gap-1.5">
+                              <AlertTriangle size={10} className={alert.severity === 'error' ? 'text-error mt-0.5' : 'text-amber-400 mt-0.5'} />
+                              <span>{alert.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

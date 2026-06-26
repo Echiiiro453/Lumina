@@ -2780,6 +2780,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           isOpen={showDiagnostics}
           onClose={() => setShowDiagnostics(false)}
           currentSong={currentSong}
+          isPlaying={isPlaying}
+          audioRef={audioRef}
           audioContextRef={audioContextRef}
           analyserRef={analyserRef}
           masterGainRef={masterGainRef}
