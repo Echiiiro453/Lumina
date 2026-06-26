@@ -8,12 +8,18 @@ import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
 import { getAutoCalibrationProfile, SEEK_TEMP_HEADROOM_DB } from '../audio/presets/autoCalibrationProfiles';
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
-export const logToCMD = (source, message, level = "info") => {
+// Throttled per-source to avoid flooding the backend/browser with HTTP requests.
+const _logCooldowns = new Map();
+export const logToCMD = (source, message, level = "info", cooldownMs = 1000) => {
+  const now = Date.now();
+  const lastTime = _logCooldowns.get(source) || 0;
+  if (now - lastTime < cooldownMs) return;
+  _logCooldowns.set(source, now);
   fetch("http://localhost:8000/api/telemetry", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source, message, level })
-  }).catch(() => {});
+  }).catch(() => { /* Diagnostic logging is best-effort. */ });
 };
 // ---------------------------------------------------
 
@@ -495,13 +501,17 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       })
     }).catch(() => {});
     
-    // Log de telemetria
-    if (isPlaying) {
-      logToCMD("PLAYER", `Tocando faixa: ${currentSong?.title || 'Desconhecida'}`, "info");
-    } else {
-      logToCMD("PLAYER", "Música pausada.", "warn");
-    }
   }, [currentSong, isPlaying, progress, duration, metadata]);
+
+  // Log de telemetria do player (apenas quando faixa ou estado de play muda, nao a cada tick de progresso)
+  useEffect(() => {
+    if (!currentSong) return;
+    if (isPlaying) {
+      logToCMD("PLAYER", `Tocando faixa: ${currentSong?.title || 'Desconhecida'}`, "info", 0);
+    } else {
+      logToCMD("PLAYER", "Música pausada.", "warn", 0);
+    }
+  }, [currentSong?.title, currentSong?.file, isPlaying]);
 
   // Poll commands from MiniPlayer
   useEffect(() => {
@@ -1767,7 +1777,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
             };
             
             masterTelemetryRef.current = tele;
-            logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success");
+            logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success", 2000);
 
             const nowLog = Date.now();
             if (stabilizedRisk !== lastPerformanceGovernorRiskRef.current || nowLog - lastPerformanceGovernorLogTimeRef.current > 5000) {
