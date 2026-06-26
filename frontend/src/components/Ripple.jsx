@@ -5,7 +5,7 @@
  */
 import React, { useState, useCallback } from 'react';
 
-export function useRipple() {
+function useRipple() {
   const [ripples, setRipples] = useState([]);
 
   const addRipple = useCallback((e) => {

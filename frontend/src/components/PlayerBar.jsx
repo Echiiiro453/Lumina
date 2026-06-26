@@ -3,24 +3,17 @@ import { t } from '../i18n';
 import { Music, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, X, Maximize2, Minimize2, ExternalLink, Repeat, Shuffle, Info, Activity, Layers, SlidersHorizontal, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RippleButton } from './Ripple';
-import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
+import { EqualizerModal } from './EqualizerModal';
+import { EQ_PRESETS, EQ_BANDS } from './equalizerConstants';
 import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
 import { getAutoCalibrationProfile, SEEK_TEMP_HEADROOM_DB } from '../audio/presets/autoCalibrationProfiles';
+import { logToCMD } from './playerConstants';
+
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
 // Throttled per-source to avoid flooding the backend/browser with HTTP requests.
-const _logCooldowns = new Map();
-export const logToCMD = (source, message, level = "info", cooldownMs = 1000) => {
-  const now = Date.now();
-  const lastTime = _logCooldowns.get(source) || 0;
-  if (now - lastTime < cooldownMs) return;
-  _logCooldowns.set(source, now);
-  fetch("http://localhost:8000/api/telemetry", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source, message, level })
-  }).catch(() => { /* Diagnostic logging is best-effort. */ });
-};
+
+
 // ---------------------------------------------------
 
 const createReverbIR = (audioCtx, duration, decay) => {
@@ -203,47 +196,6 @@ function sanitizeHeadphoneProfile(profile) {
   };
 }
 
-export function parseAutoEqTxt(text, meta = {}) {
-  const lines = text.split(/\r?\n/);
-  let preampDb = 0;
-  const filters = [];
-  for (const line of lines) {
-    const preampMatch = line.match(/Preamp:\s*([-+]?\d+(\.\d+)?)\s*dB/i);
-    if (preampMatch) {
-      preampDb = parseFloat(preampMatch[1]);
-      continue;
-    }
-    const filterMatch = line.match(
-      /Filter\s+\d+:\s+ON\s+(\w+)\s+Fc\s+([-+]?\d+(\.\d+)?)\s+Hz\s+Gain\s+([-+]?\d+(\.\d+)?)\s+dB\s+Q\s+([-+]?\d+(\.\d+)?)/i
-    );
-    if (filterMatch) {
-      const autoEqType = filterMatch[1].toUpperCase();
-      const typeMap = {
-        PK: "peaking",
-        LS: "lowshelf",
-        HS: "highshelf",
-        LP: "lowpass",
-        HP: "highpass"
-      };
-      filters.push({
-        type: typeMap[autoEqType] ?? "peaking",
-        freq: Number(filterMatch[2]),
-        gainDb: Number(filterMatch[4]),
-        Q: Number(filterMatch[6])
-      });
-    }
-  }
-  return sanitizeHeadphoneProfile({
-    id: meta.id ?? "custom-profile",
-    name: meta.name ?? "Custom AutoEQ Profile",
-    brand: meta.brand ?? "Unknown",
-    type: meta.type ?? "Unknown",
-    source: "AutoEQ TXT",
-    target: meta.target ?? "Unknown",
-    preampDb,
-    filters
-  });
-}
 
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
 

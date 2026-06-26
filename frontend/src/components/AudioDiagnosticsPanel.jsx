@@ -4,7 +4,7 @@ import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu, ShieldAlert, Play, 
 import { TEST_SUITES, runAudioTest, runDspSoakTest } from '../utils/audioTortureRunner';
 import { AUTO_CALIBRATION_PROFILES, calculateAnticipativeHeadroom } from '../audio/presets/autoCalibrationProfiles';
 import { createHealthSnapshot, createHealthSoakReport, downloadJsonReport, evaluateHealthAlerts } from '../utils/healthSnapshot';
-import { logToCMD } from './PlayerBar';
+import { logToCMD } from './playerConstants';
 
 /**
  * AudioDiagnosticsPanel
