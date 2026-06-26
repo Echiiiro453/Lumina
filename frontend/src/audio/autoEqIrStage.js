@@ -41,11 +41,12 @@ export function createAutoEqIrStage(audioCtx) {
   dryGain.gain.value = 1.0;
   wetGain.gain.value = 0.0;
 
-  // Topologia fixa (sem convolver ainda)
+  // Topologia fixa — estas ligações nunca são desconectadas
   input.connect(preGain);
   preGain.connect(dryGain);
   dryGain.connect(output);
-  // A ramificação do convolver é conectada ao carregar o WAV
+  wetGain.connect(output); // permanente: wetGain → output sempre existe, só o gain varia
+  // A ramificação do convolver (preGain → convolver → wetGain) é conectada ao carregar o WAV
 
   return {
     input,
@@ -96,10 +97,10 @@ export async function loadAutoEqWav(stage, audioCtx, fileOrBuffer, options = {})
   convolver.normalize = false; // Preserva a curva da IR sem normalização automática
   convolver.buffer = audioBuffer;
 
-  // Conecta: preGain → convolver → wetGain → output
+  // Conecta apenas: preGain → convolver → wetGain
+  // (wetGain → output já é permanente, criado em createAutoEqIrStage)
   stage.preGain.connect(convolver);
   convolver.connect(stage.wetGain);
-  stage.wetGain.connect(stage.output);
   stage._convolver = convolver;
 
   // Aplica preamp no preGain
@@ -185,13 +186,21 @@ export function getAutoEqIrInfo(stage) {
 
 function _disconnectConvolver(stage, audioCtx) {
   if (!stage._convolver) return;
+
+  // Desconecta apenas o convolver da cadeia.
+  // wetGain → output é uma ligação PERMANENTE e NUNCA é desconectada aqui,
+  // para garantir que um segundo load funcione corretamente.
   try {
     stage.preGain.disconnect(stage._convolver);
-    stage._convolver.disconnect(stage.wetGain);
-    stage.wetGain.disconnect(stage.output);
-  } catch { /* noop — nodes may already be disconnected */ }
+  } catch { /* noop */ }
+
+  try {
+    stage._convolver.disconnect(); // desconecta o convolver de todas as saídas
+  } catch { /* noop */ }
+
   stage._convolver = null;
-  // Garante que o wetGain vai para 0 antes de desconectar
+
+  // Silencia suavemente o canal wet
   if (audioCtx) {
     stage.wetGain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.005);
   }
