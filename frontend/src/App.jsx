@@ -746,55 +746,6 @@ function App() {
     }, 500);
   };
 
-  const handleBatchEnqueue = (urlsList) => {
-    if (urlsList.length === 0) return;
-
-    // --- COOKIE ENFORCEMENT ---
-    if (!isAuthenticated) {
-      const confirmUpload = window.confirm(
-        `⚠️ ATENÇÃO: Você está tentando iniciar downloads sem login (sem cookies.txt).\n\n` +
-        `Isso tem uma alta chance de resultar em erros no download ou banimento/bloqueio temporário do seu IP pelo YouTube.\n\n` +
-        `Clique em OK para enviar seus cookies agora (Recomendado), ou CANCELAR para prosseguir por sua conta e risco.`
-      );
-
-      if (confirmUpload) {
-        setShowSettings(true);
-        return;
-      }
-    }
-    // ---------------------------
-
-    const queueItems = urlsList.map((url, idx) => {
-      const displayTitle = url.length > 50 ? url.substring(0, 50) + '...' : url;
-      return {
-        id: undefined,
-        title: displayTitle,
-        thumbnail: null,
-        uploader: 'Lote',
-        duration_string: '—',
-        url: url,
-        uniqueId: Date.now() + Math.random() + idx,
-        pitch: mode === 'audio' ? pitch : 0,
-        speed: mode === 'audio' ? speed : 1.0,
-        subtitle: mode === 'video' ? subtitle : 'none',
-        status: 'pending',
-        progress: 0,
-        addedAt: Date.now()
-      };
-    });
-
-    setQueue(prev => [...prev, ...queueItems]);
-    setShowQueue(true);
-
-    addToast(t('batchAddedToast') ? t('batchAddedToast').replace('x', queueItems.length) : `${queueItems.length} links adicionados à fila!`, 'success');
-
-    // Tentar iniciar automaticamente após render
-    setTimeout(() => {
-      const startBtn = document.getElementById('start-downloads-btn');
-      if (startBtn) startBtn.click();
-    }, 500);
-  };
-
   // ===== REDOWNLOAD LOGIC =====
   const executeRetry = async (video, playlistId) => {
     try {
@@ -879,65 +830,6 @@ function App() {
   };
 
   // Independent Downloader Function
-  const downloadItem = async (item) => {
-    updateQueueItem(item.uniqueId, { status: 'downloading', progress: 0 });
-
-    try {
-      const downloadUrl = item.url || `https://www.youtube.com/watch?v=${item.id}`;
-
-      // Enqueue
-      const response = await axios.post(getApiUrl('/download'), {
-        url: downloadUrl,
-        quality: quality,
-        mode: mode,
-        pitch: item.pitch !== undefined ? item.pitch : pitch,
-        speed: item.speed !== undefined ? item.speed : speed,
-        organize: organizeByArtist,
-        organize_by_playlist: organizeByPlaylist,
-        sponsorblock_enabled: sponsorblockEnabled,
-        video_codec: videoCodec,
-        compress_video: compressVideo
-      });
-
-      const { job_id } = response.data;
-
-      // Poll
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await axios.get(getApiUrl(`/download/status/${job_id}`));
-          const statusData = statusRes.data;
-
-          if (statusData.status === 'downloading') {
-            updateQueueItem(item.uniqueId, {
-              status: 'downloading',
-              progress: statusData.progress || 1
-            });
-          } else if (statusData.status === 'processing') {
-            updateQueueItem(item.uniqueId, { status: 'processing', progress: 99 });
-          } else if (statusData.status === 'done') {
-            clearInterval(pollInterval);
-            updateQueueItem(item.uniqueId, { status: 'completed', progress: 100 });
-          } else if (statusData.status === 'error') {
-            clearInterval(pollInterval);
-            let queueErrMsg = statusData.error || 'Erro';
-              if (!isAuthenticated) {
-                  queueErrMsg += ' (Dica: Adicione seus cookies.txt nas configurações!)';
-              }
-              updateQueueItem(item.uniqueId, { status: 'error', error: queueErrMsg });
-          }
-        } catch (e) {
-          console.error(e);
-          clearInterval(pollInterval);
-          updateQueueItem(item.uniqueId, { status: 'error', error: 'Poll failed' });
-        }
-      }, 1000);
-
-    } catch (error) {
-      console.error(error);
-      updateQueueItem(item.uniqueId, { status: 'error', progress: 0 });
-    }
-  };
-
   // Queue Monitor Effect
   React.useEffect(() => {
     if (!isProcessingQueue) return;
