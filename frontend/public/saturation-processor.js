@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Lumina Harmonic Saturation Processor v9.3
  * Three analogue-modelled saturation modes with Second-Order ADAA (Anti-Derivative Anti-Aliasing).
