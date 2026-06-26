@@ -8,6 +8,13 @@ import { EQ_PRESETS, EQ_BANDS } from './equalizerConstants';
 import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
 import { getAutoCalibrationProfile, SEEK_TEMP_HEADROOM_DB } from '../audio/presets/autoCalibrationProfiles';
 import { logToCMD } from './playerConstants';
+import {
+  createAutoEqIrStage,
+  loadAutoEqWav,
+  disableAutoEqWav,
+  getAutoEqIrInfo,
+  setAutoEqIrIntensity,
+} from '../audio/autoEqIrStage';
 
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
@@ -212,6 +219,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [autoEqAmount, setAutoEqAmount] = useState(0.75);
   const autoEqPreampRef = useRef(null);
   const autoEqFiltersRef = useRef([]);
+
+  // --- AutoEQ WAV / IR Stage ---
+  const autoEqIrStageRef = useRef(null);
+  const [autoEqWavInfo, setAutoEqWavInfo] = useState(null);
 
   // --- AB Comparator ---
   const [abMode, setAbMode] = useState('PROCESSED');
@@ -598,12 +609,62 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     Carpete: { hfDampingDb: -6.0, midDampingDb: -2.0, wetWidth: 0.60, wetMixMult: 0.60, hpfOffset: 80, lpfOffset: -5000 }
   };
 
+  // --- AutoEQ WAV (ConvolverNode) ---
+  useEffect(() => {
+    const ctx = audioContextRef.current;
+    const stage = autoEqIrStageRef.current;
+    if (!ctx || !stage) return;
+
+    const isWav = autoEqProfile && autoEqProfile.source === 'AutoEQ WAV';
+
+    if (!isWav) {
+      // Se removido ou perfil TXT, desativa o IR
+      if (stage.irInfo?.loaded) {
+        disableAutoEqWav(stage, ctx);
+        setAutoEqWavInfo(null);
+      }
+      return;
+    }
+
+    // Perfil WAV: carregar e conectar
+    const { _arrayBuffer, preampDb, name: fileName } = autoEqProfile;
+    if (!_arrayBuffer) return;
+
+    const intensityKey = autoEqAmount >= 1.0 ? 'completa' : autoEqAmount >= 0.65 ? 'natural' : 'leve';
+
+    loadAutoEqWav(stage, ctx, _arrayBuffer, {
+      preampDb: preampDb ?? 0,
+      intensity: intensityKey,
+      fileName,
+    })
+      .then(() => {
+        setAutoEqWavInfo(getAutoEqIrInfo(stage));
+      })
+      .catch((err) => {
+        console.error('[AutoEQ-IR] Erro ao carregar WAV:', err);
+        setAutoEqWavInfo(null);
+      });
+  }, [autoEqProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- AutoEQ WAV: reage a mudança de intensidade (sem recarregar o buffer) ---
+  useEffect(() => {
+    const ctx = audioContextRef.current;
+    const stage = autoEqIrStageRef.current;
+    if (!ctx || !stage || !stage.irInfo?.loaded) return;
+    const intensityKey = autoEqAmount >= 1.0 ? 'completa' : autoEqAmount >= 0.65 ? 'natural' : 'leve';
+    setAutoEqIrIntensity(stage, ctx, intensityKey);
+    setAutoEqWavInfo(getAutoEqIrInfo(stage));
+  }, [autoEqAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- AutoEQ TXT (Biquad Filters) ---
   useEffect(() => {
     if (!autoEqPreampRef.current || !autoEqFiltersRef.current || !audioContextRef.current) return;
     
     const ctx = audioContextRef.current;
-    if (!autoEqProfile) {
-      // Bypass
+    const isWav = autoEqProfile && autoEqProfile.source === 'AutoEQ WAV';
+
+    // Para WAV, a chain biquad fica flat (bypass)
+    if (!autoEqProfile || isWav) {
       autoEqPreampRef.current.gain.setTargetAtTime(1.0, ctx.currentTime, 0.1);
       autoEqFiltersRef.current.forEach(f => {
         f.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
@@ -1135,7 +1196,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       ditherSrc.start();
       ditherSrc.connect(source);
       
-      // --- AutoEQ Chain ---
+      // --- AutoEQ WAV / IR Stage (ConvolverNode) ---
+      // Fica entre o replayGainNode e os filtros Biquad do AutoEQ TXT.
+      // Quando nenhum WAV está carregado, funciona como bypass puro.
+      const irStage = createAutoEqIrStage(audioCtx);
+      autoEqIrStageRef.current = irStage;
+      replayGainNode.connect(irStage.input);
+
+      // --- AutoEQ TXT Chain (Biquad) ---
       const autoEqPreamp = audioCtx.createGain();
       autoEqPreampRef.current = autoEqPreamp;
       const autoEqFilters = [];
@@ -1148,8 +1216,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          autoEqFilters.push(f);
       }
       autoEqFiltersRef.current = autoEqFilters;
-      
-      replayGainNode.connect(autoEqPreamp);
+
+      // IR Stage output → preamp TXT → filtros Biquad
+      irStage.output.connect(autoEqPreamp);
       autoEqPreamp.connect(autoEqFilters[0]);
       for(let i=0; i<11; i++) {
          autoEqFilters[i].connect(autoEqFilters[i+1]);
@@ -2658,6 +2727,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           enableReplayGain={enableReplayGain} setEnableReplayGain={setEnableReplayGain}
           autoEqProfile={autoEqProfile} setAutoEqProfile={setAutoEqProfile}
           autoEqAmount={autoEqAmount} setAutoEqAmount={setAutoEqAmount}
+          autoEqWavInfo={autoEqWavInfo}
           abMode={abMode} setAbMode={setAbMode}
           abBlend={abBlend} setAbBlend={setAbBlend}
           presetIntensity={presetIntensity}

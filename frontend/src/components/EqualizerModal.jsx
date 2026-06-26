@@ -185,6 +185,7 @@ export function EqualizerModal({
   
   autoEqProfile, setAutoEqProfile,
   autoEqAmount, setAutoEqAmount,
+  autoEqWavInfo,
   
   abMode, setAbMode,
   abBlend, setAbBlend,
@@ -206,14 +207,36 @@ export function EqualizerModal({
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
-      if (setAutoEqProfile) {
-        setAutoEqProfile(parseAutoEqTxt(text, { name: file.name.replace('.txt', ''), id: file.name }));
-      }
-    };
-    reader.readAsText(file);
+
+    const isWav = file.name.toLowerCase().endsWith('.wav');
+
+    if (isWav) {
+      // Lê como ArrayBuffer para o ConvolverNode
+      file.arrayBuffer().then((buf) => {
+        if (setAutoEqProfile) {
+          setAutoEqProfile({
+            id: file.name,
+            name: file.name,
+            source: 'AutoEQ WAV',
+            _arrayBuffer: buf,
+            preampDb: -0.7, // preamp conservador padrão para WAV
+            filters: [],    // WAV não usa filtros Biquad
+            maxBoostDb: 0,
+            safety: 'OK',
+          });
+        }
+      });
+    } else {
+      // Lê como texto (.txt)
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target.result;
+        if (setAutoEqProfile) {
+          setAutoEqProfile(parseAutoEqTxt(text, { name: file.name.replace('.txt', ''), id: file.name }));
+        }
+      };
+      reader.readAsText(file);
+    }
   };
 
   const applyPreset = (presetName, intensity = presetIntensity) => {
@@ -457,10 +480,10 @@ export function EqualizerModal({
 
                   {!autoEqProfile ? (
                     <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
-                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)] mb-4 text-center">Importe um preset do AutoEQ (.txt)<br/>para corrigir seu fone de ouvido.</p>
+                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)] mb-4 text-center">Importe um preset do AutoEQ (.txt)<br/>ou um Impulse Response (.wav)<br/>para corrigir seu fone de ouvido.</p>
                       <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] rounded-full text-xs font-bold hover:shadow-lg transition-all">
                         Carregar Preset
-                        <input type="file" accept=".txt" onChange={handleFileUpload} className="hidden" />
+                        <input type="file" accept=".txt,.wav" onChange={handleFileUpload} className="hidden" />
                       </label>
                     </div>
                   ) : (
@@ -471,11 +494,27 @@ export function EqualizerModal({
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${autoEqProfile.safety === 'OK' ? 'bg-[#4ade80]/20 text-[#4ade80]' : 'bg-[#facc15]/20 text-[#facc15]'}`}>{autoEqProfile.safety}</span>
                         </div>
                         <div className="text-sm font-bold text-[var(--md-sys-color-on-surface)]">{autoEqProfile.name}</div>
-                        <div className="flex space-x-4 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
-                          <div>Filtros: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.filters.length}</span></div>
-                          <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb.toFixed(1)}dB</span></div>
-                          <div>Boost Max: <span className="text-[var(--md-sys-color-primary)] font-bold">+{autoEqProfile.maxBoostDb.toFixed(1)}dB</span></div>
-                        </div>
+
+                        {autoEqProfile.source === 'AutoEQ WAV' ? (
+                          /* Card WAV / IR */
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                            <div>Tipo: <span className="text-[var(--md-sys-color-primary)] font-bold">WAV / Impulse Response</span></div>
+                            <div>IR: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo?.loaded ? 'Carregado' : 'Aguardando...'}</span></div>
+                            <div>Convolver: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo?.convolverConnected ? 'Ativo' : 'Inativo'}</span></div>
+                            {autoEqWavInfo?.sampleRate && <div>Sample Rate: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.sampleRate} Hz</span></div>}
+                            {autoEqWavInfo?.durationMs && <div>Duração: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.durationMs} ms</span></div>}
+                            {autoEqWavInfo?.channels && <div>Canais: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.channels}</span></div>}
+                            <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb?.toFixed(1)}dB</span></div>
+                          </div>
+                        ) : (
+                          /* Card TXT / Biquad */
+                          <div className="flex space-x-4 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                            <div>Tipo: <span className="text-[var(--md-sys-color-primary)] font-bold">Parametric EQ</span></div>
+                            <div>Filtros: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.filters.length}</span></div>
+                            <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb.toFixed(1)}dB</span></div>
+                            <div>Boost Max: <span className="text-[var(--md-sys-color-primary)] font-bold">+{autoEqProfile.maxBoostDb.toFixed(1)}dB</span></div>
+                          </div>
+                        )}
                       </div>
 
                       <div>
