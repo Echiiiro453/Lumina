@@ -109,7 +109,8 @@ export const createHealthSnapshot = ({
     },
     logs: {
       bufferSize: toFiniteNumber(logBufferSize),
-      telemetryThrottled: true
+      telemetryThrottled: true,
+      audioLogsDisabled: true
     },
     downloads: {
       activeJobs: toFiniteNumber(activeJobs),

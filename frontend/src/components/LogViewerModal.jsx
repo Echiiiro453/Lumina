@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Terminal, Copy, Check } from 'lucide-react';
 import axios from 'axios';
+import { isAudioTelemetryLine, MAX_VISIBLE_LOGS } from './playerConstants';
 
 export function LogViewerModal({ isOpen, onClose, apiUrl }) {
   const [logs, setLogs] = useState([]);
@@ -15,7 +16,9 @@ export function LogViewerModal({ isOpen, onClose, apiUrl }) {
         try {
           const res = await axios.get(`${apiUrl}/api/logs`);
           if (res.data && res.data.logs) {
-            setLogs(res.data.logs);
+            setLogs(res.data.logs
+              .filter((line) => !isAudioTelemetryLine(null, line))
+              .slice(-MAX_VISIBLE_LOGS));
           }
         } catch (e) {
           console.error("Failed to fetch logs", e);
