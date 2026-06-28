@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { probeCount } from "../utils/audioLagProbe";
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Activity, Check, AlertTriangle, Zap, Radio, Cpu, ShieldAlert, Play, Sliders, FileSearch, ShieldCheck, AlertCircle, FileAudio, RefreshCw } from 'lucide-react';
 import { TEST_SUITES, runAudioTest, runDspSoakTest } from '../utils/audioTortureRunner';
@@ -57,6 +58,7 @@ export function AudioDiagnosticsPanel({
   lastResumeStatusRef,
   setAutoCalibProfile
 }) {
+  probeCount("renders", "AudioDiagnosticsPanel");
   const curveCanvasRef = useRef(null);
   const rafRef = useRef(null);
   const [nodes, setNodes] = useState([]);
@@ -590,11 +592,12 @@ export function AudioDiagnosticsPanel({
     const canvas = curveCanvasRef.current;
     const ctx = canvas.getContext('2d');
     let raf;
+    let stopped = false;
     let lastDrawTime = 0;
 
     const drawCurve = () => {
-      raf = requestAnimationFrame(drawCurve);
-      
+      if (stopped) return;
+
       const mTele = masterTelemetryRef?.current;
       const risk = mTele?.governorRisk || "LOW";
 
@@ -747,11 +750,14 @@ export function AudioDiagnosticsPanel({
       const text = `HPF: ${Math.round(hpfVal)}Hz | LPF: ${(lpfVal/1000).toFixed(1)}kHz | Mid: ${midDb.toFixed(1)}dB | HF: ${hfDb.toFixed(1)}dB`;
       ctx.fillText(text, W - ctx.measureText(text).width - 10, 15);
 
-      raf = requestAnimationFrame(drawCurve);
+      if (!stopped) raf = requestAnimationFrame(drawCurve);
     };
 
-    drawCurve();
-    return () => cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(drawCurve);
+    return () => {
+      stopped = true;
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [isOpen, wetHpfRef, wetLpfRef, wetMidEqRef, wetHighEqRef, analyserRef, activeTab]);
 
   // ---- Quality Score Calculation -----------------------------------------
