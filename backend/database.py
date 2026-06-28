@@ -60,7 +60,16 @@ def init_db():
     except Exception as e:
         print(f"Erro ao inicializar DB: {e}")
 
-def add_favorite(video_id: str, title: str, file_path: str) -> bool:
+def add_favorite(video_id: str, title: str, file_path: str = "", *_args, channel: str = None,
+                 duration: int = None, thumbnail: str = None, **_kwargs) -> bool:
+    """Adiciona um favorito (INSERT OR IGNORE).
+
+    Assinatura expandida para aceitar campos extras (channel/duration/thumbnail) que
+    alguns chamadores (routers/library.py) passam via FavoriteRequest. Esses campos não
+    são persistidos (a tabela favorites só tem video_id/title/file_path/added_at) e são
+    aceitos para evitar TypeError quando a rota deduplicada entrar em produção. O *_args
+    e **_kwargs tornam a função tolerante a variações de schema entre main.py e routers.
+    """
     try:
         conn = get_conn()
         cur = conn.cursor()
