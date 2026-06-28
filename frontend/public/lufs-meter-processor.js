@@ -6,6 +6,8 @@
 class LUFSMeterProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
+    this.port.onmessage = (e) => { if (e.data && e.data.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; } };
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
     // Stage 1: High-shelf pre-filter (K-weighting)
@@ -77,10 +79,13 @@ class LUFSMeterProcessor extends AudioWorkletProcessor {
 
       if (++this.reportCnt >= this.reportStep) {
         this.reportCnt = 0;
+        if (!this.telemetryEnabled) continue;
         const count = this.bufFull ? this.buf.length : Math.max(1, this.bufIdx);
         const meanSq = Math.max(0, this.sumSq) / count;
-        const lufs = meanSq > 1e-10 ? (-0.691 + 10 * Math.log10(meanSq)) : -Infinity;
-        this.port.postMessage({ lufs });
+        // Clamp -Infinity (silêncio) para evitar NaN na UI; padroniza payload com type/name.
+        const raw = meanSq > 1e-10 ? (-0.691 + 10 * Math.log10(meanSq)) : -70;
+        const lufs = Number.isFinite(raw) ? Math.max(raw, -70) : -70;
+        this.port.postMessage({ type: 'telemetry', name: 'LUFS', lufs });
       }
     }
     return true;

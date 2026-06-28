@@ -15,6 +15,7 @@ import {
   getAutoEqIrInfo,
   setAutoEqIrIntensity,
 } from '../audio/autoEqIrStage';
+import { probeCount } from '../utils/audioLagProbe';
 
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
@@ -144,7 +145,10 @@ function calculateReplayGain({
 
 
 
+const DISABLE_WORKLET_TELEMETRY = typeof window !== 'undefined' && localStorage.getItem('lumina.disableWorkletTelemetry') === '1';
+
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
+  probeCount('renders', 'PlayerBar');
 
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -202,7 +206,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const masteringRef = useRef(null);
   const lufsRef = useRef(null);
-  const [, setLufsValue] = useState(null);
+  const lufsValueRef = useRef(null); // LUFS reportado pelo worklet; UI lê por polling, sem setState
 
   // --- Missing / New DSP States & Refs ---
   const [enableReplayGain, setEnableReplayGain] = useState(true);
@@ -334,13 +338,15 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         onPrev();
       }
     };
+    probeCount('listenersAdded', 'voiceCommand');
     window.addEventListener('voiceCommand', handleVoice);
-    return () => window.removeEventListener('voiceCommand', handleVoice);
+    return () => { probeCount('listenersRemoved', 'voiceCommand'); window.removeEventListener('voiceCommand', handleVoice); };
   }, [isPlaying, onNext, onPrev]);
 
   // Sleep Timer Countdown
   useEffect(() => {
     if (sleepTimer === null) return;
+    probeCount('intervalsCreated', 'PlayerBar');
     const interval = setInterval(() => {
       setSleepTimeLeft(prev => {
         if (prev <= 1) {
@@ -351,7 +357,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(interval);
+    return () => { probeCount('intervalsCleared', 'PlayerBar'); clearInterval(interval); };
   }, [sleepTimer]);
 
   const handleSetSleepTimer = (minutes) => {
@@ -401,6 +407,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   // Poll commands from MiniPlayer
   useEffect(() => {
+    probeCount('intervalsCreated', 'PlayerBar');
     const interval = setInterval(() => {
       fetch('http://localhost:8000/api/miniplayer/command')
         .then(res => res.json())
@@ -412,7 +419,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         })
         .catch(() => {});
     }, 500);
-    return () => clearInterval(interval);
+    return () => { probeCount('intervalsCleared', 'PlayerBar'); clearInterval(interval); };
   }, [onNext, onPrev]);
 
   const openMiniPlayer = () => {
@@ -1092,12 +1099,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          }
       }
       
+      probeCount('rafCreated', 'updatePan');
       animationFrameId = requestAnimationFrame(updatePan);
     };
 
     updatePan();
 
     return () => {
+      probeCount('rafCanceled', 'updatePan');
       cancelAnimationFrame(animationFrameId);
     };
   }, [enable8D, motionMode, motionSpeed, motionRadius, isPlaying]);
@@ -1171,7 +1180,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       try {
         await audioCtx.audioWorklet.addModule('/source-quality-processor.js?v=' + Date.now());
         sourceQualityNode = new AudioWorkletNode(audioCtx, 'source-quality');
-        sourceQualityNode.port.onmessage = (e) => {
+        sourceQualityNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      sourceQualityNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'sourceQualityNode');
+        probeCount('portMessages', 'sourceQualityNode');
           if (e.data.type === 'telemetry') {
             sourceQualityTelemetryRef.current = e.data;
           }
@@ -1325,7 +1337,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deesser-processor.js');
       const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
       deesserNode.port.postMessage({ active: enableDeesser });
+      deesserNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       deesserNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'deesserNode');
+        probeCount('portMessages', 'deesserNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deesserRef.current = deesserNode;
@@ -1335,7 +1350,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deharsh-processor.js');
       const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
       deharshNode.port.postMessage({ active: enableDeharsh });
+      deharshNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       deharshNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'deharshNode');
+        probeCount('portMessages', 'deharshNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deharshRef.current = deharshNode;
@@ -1349,7 +1367,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
 
+      saturationNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       saturationNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'saturationNode');
+        probeCount('portMessages', 'saturationNode');
         // if (e.data.type === 'telemetry') {
         //   logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         // }
@@ -1358,7 +1379,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
+      submonoNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       submonoNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'submonoNode');
+        probeCount('portMessages', 'submonoNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       submonoRef.current = submonoNode;
@@ -1384,7 +1408,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const widthMap = { Estreito: 0.5, Natural: 1.0, Largo: 1.4, Ultra: 1.8 };
       const wVal = widthMap[stereoWidth] !== undefined ? widthMap[stereoWidth] : 1.0;
       mbWidthNode.port.postMessage({ width: wVal });
+      mbWidthNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       mbWidthNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'mbWidthNode');
+        probeCount('portMessages', 'mbWidthNode');
         if (e.data && e.data.type === 'telemetry') {
           multibandStereoTelemetryRef.current = e.data;
         }
@@ -1406,7 +1433,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/depth-processor.js');
         const depthNode = new AudioWorkletNode(audioCtx, 'depth');
         depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
-        depthNode.port.onmessage = () => {
+        depthNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      depthNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'depthNode');
+        probeCount('portMessages', 'depthNode');
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         depthRef.current = depthNode;
@@ -1433,7 +1463,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
            preDelayMs: 18, 
            rt60: 3.5
         });
-        roomTelemetryNode.port.onmessage = () => {
+        roomTelemetryNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      roomTelemetryNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'roomTelemetryNode');
+        probeCount('portMessages', 'roomTelemetryNode');
           // se quiser debugar a sala, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -1513,7 +1546,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/lumina-mastering.js');
         const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
         masteringNode.port.postMessage({ enablePhaseRotation });
-        masteringNode.port.onmessage = () => {
+        masteringNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      masteringNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'masteringNode');
+        probeCount('portMessages', 'masteringNode');
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         masteringRef.current = masteringNode;
@@ -1528,11 +1564,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const lufsNode = new AudioWorkletNode(audioCtx, 'lufs-meter');
         
         let lastLufsLogTime = 0;
-        lufsNode.port.onmessage = (msg) => {
+        lufsNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      lufsNode.port.onmessage = (msg) => {
+        probeCount('portHandlersRegistered', 'lufsNode');
+        probeCount('portMessages', 'lufsNode');
           if (msg.data && msg.data.lufs !== undefined) {
             const val = Math.round(msg.data.lufs * 10) / 10;
-            setLufsValue(val);
-            
+            lufsValueRef.current = val;
+
             // Log de telemetria a cada 5 segundos para não floodar o CMD
             const now = Date.now();
             if (now - lastLufsLogTime > 5000) {
@@ -1556,7 +1595,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const wetParam = panner8DNode.parameters.get('wet');
         if (wetParam) wetParam.value = enable8D ? 0.20 : 0.0;
         
-        panner8DNode.port.onmessage = () => {
+        panner8DNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      panner8DNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'panner8DNode');
+        probeCount('portMessages', 'panner8DNode');
           // se quiser debugar o panner, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -1585,7 +1627,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           type: "state",
           isPlaying: isPlayingRef.current
         });
-        truePeakNode.port.onmessage = (e) => {
+        truePeakNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      truePeakNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'truePeakNode');
+        probeCount('portMessages', 'truePeakNode');
           if (e.data.type === 'telemetry') {
             const data = e.data;
             let reductionDb = 0.0;
@@ -1778,7 +1823,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         abComparatorNode.port.postMessage({ mode: abModeRef.current, blend: abBlendRef.current });
         
         let lastAbLogTime = 0;
-        abComparatorNode.port.onmessage = (e) => {
+        abComparatorNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      abComparatorNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'abComparatorNode');
+        probeCount('portMessages', 'abComparatorNode');
            if (e.data.type === 'telemetry') {
               const now = Date.now();
               if (now - lastAbLogTime > 2000) {
@@ -1822,7 +1870,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         });
         
         let lastScopeLogTime = 0;
-        stereoScopeNode.port.onmessage = (e) => {
+        stereoScopeNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      stereoScopeNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'stereoScopeNode');
+        probeCount('portMessages', 'stereoScopeNode');
            if (e.data.type === 'telemetry') {
               stereoTelemetryRef.current = e.data;
               const now = Date.now();
@@ -1870,6 +1921,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const drawVisualizer = () => {
     if (!analyserRef.current || !canvasRef.current) {
+      probeCount('rafCreated', 'visualizer');
       animationRef.current = requestAnimationFrame(drawVisualizer);
       return;
     }
@@ -1882,6 +1934,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     const dataArray = new Uint8Array(bufferLength);
     
     const draw = () => {
+      probeCount('rafCreated', 'visualizer');
       animationRef.current = requestAnimationFrame(draw);
       analyserRef.current.getByteFrequencyData(dataArray);
       
@@ -1910,7 +1963,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   // Cleanup visualizer
   useEffect(() => {
     return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      if (animationRef.current) probeCount('rafCanceled', 'visualizer');
+      cancelAnimationFrame(animationRef.current);
     };
   }, []);
 
@@ -2084,7 +2138,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       seekGateRef.current.gain.setValueAtTime(seekGateRef.current.gain.value, now);
       seekGateRef.current.gain.setTargetAtTime(0.0001, now, 0.015);
 
-      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      if (seekTimeoutRef.current) probeCount('timeoutsCleared', 'seekTimeout'); clearTimeout(seekTimeoutRef.current);
+      probeCount('timeoutsCreated', 'seekTimeout');
       seekTimeoutRef.current = setTimeout(() => {
         resetAllDspStates('seek');
         if (audioRef.current) {
