@@ -302,6 +302,7 @@ async def startup_event():
     
     # Initialize download_sem from database so it respects the saved user settings on boot
     import downloader
+    effective_concurrency = downloader.MAX_CONCURRENT_DOWNLOADS  # fallback (4)
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -311,11 +312,17 @@ async def startup_event():
         if row:
             value = max(1, min(8, int(row['value'])))
             downloader.download_sem = asyncio.Semaphore(value)
+            effective_concurrency = value
             print(f"[Startup] Concurrent downloads restored to {value}")
     except Exception as e:
         print(f"[Startup] Error loading concurrent downloads setting: {e}")
 
-    for _ in range(20):
+    # Spawn exactly as many workers as the configured concurrency limit. Antes havia um
+    # pool fixo de 20 corrotinas worker_loop competindo pelo semáforo — funcionalmente o
+    # limite efetivo já era o do semáforo, mas ficavam 20 tarefas ociosas sempre (mesmo
+    # com limite=1). Agora o nº de workers acompanha o limite configurado.
+    worker_count = effective_concurrency
+    for _ in range(worker_count):
         asyncio.create_task(worker_loop())
     asyncio.create_task(ws_broadcast_loop())
     
