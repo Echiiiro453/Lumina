@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mic, Music, Loader2, FolderOpen, Minimize2 } from 'lucide-react';
 import axios from 'axios';
 import { t } from '../i18n';
 
 export default function StudioModal({ isOpen, onClose, apiUrl }) {
+  const installPollRef = useRef(null);
   const [filePath, setFilePath] = useState('');
   const [loading, setLoading] = useState(false);
   const [library, setLibrary] = useState([]);
@@ -23,6 +24,16 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
       fetchJobs();
     }
   }, [isOpen]);
+
+  // Limpa o poll de instalação quando o componente desmonta (evita setState após unmount)
+  useEffect(() => {
+    return () => {
+      if (installPollRef.current) {
+        clearInterval(installPollRef.current);
+        installPollRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let interval;
@@ -119,11 +130,12 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
         try {
           const statusRes = await axios.get(`${apiUrl}/api/studio/install/status/${currentJobId}`);
           const data = statusRes.data;
-          
+
           setInstallMessage(data.message || "Instalando...");
 
           if (data.status === "success" || data.status === "error") {
             clearInterval(pollInterval);
+            installPollRef.current = null;
             setIsInstalling(false);
             setInstallJobId(null);
             if (data.status === "error") {
@@ -137,6 +149,7 @@ export default function StudioModal({ isOpen, onClose, apiUrl }) {
           console.error("Erro ao checar status da instalação:", e);
         }
       }, 1000);
+      installPollRef.current = pollInterval;
     } catch (err) {
       alert("Erro ao iniciar instalação: " + (err.response?.data?.detail || err.message));
       setIsInstalling(false);
