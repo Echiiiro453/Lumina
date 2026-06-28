@@ -109,8 +109,13 @@ export const createHealthSnapshot = ({
     },
     logs: {
       bufferSize: toFiniteNumber(logBufferSize),
-      telemetryThrottled: true,
-      audioLogsDisabled: true
+      // Derivado do flag real do player (localStorage 'lumina.disableWorkletTelemetry'),
+      // em vez de afirmar 'true' sempre. true => telemetria de worklets desligada.
+      audioLogsDisabled: typeof localStorage !== 'undefined'
+        ? localStorage.getItem('lumina.disableWorkletTelemetry') === '1'
+        : null,
+      // Não há medição confiável de throttling aqui; null = desconhecido (antes era 'true').
+      telemetryThrottled: null
     },
     downloads: {
       activeJobs: toFiniteNumber(activeJobs),
