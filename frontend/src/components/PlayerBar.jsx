@@ -207,6 +207,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const masteringRef = useRef(null);
   const lufsRef = useRef(null);
   const lufsValueRef = useRef(null); // LUFS reportado pelo worklet; UI lê por polling, sem setState
+  const lastMiniplayerPostRef = useRef(0); // throttle do POST de progresso do miniplayer
 
   // --- Missing / New DSP States & Refs ---
   const [enableReplayGain, setEnableReplayGain] = useState(true);
@@ -372,13 +373,21 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   };
 
   // Sync state to backend for MiniPlayer
+  // O effect depende de `progress`, que muda ~4x/s (timeupdate). Sem throttle, isso
+  // inundaria o backend de POSTs. Assim: mudanças estruturais (faixa/play/duração/cover)
+  // são enviadas imediatamente; mudanças de `progress` são throttled para no máx 1/s.
   useEffect(() => {
     if (!currentSong) return;
-    
+
     let cover = '';
     if (metadata?.coverUrl) cover = metadata.coverUrl;
     else if (currentSong.video_id) cover = `https://i.ytimg.com/vi/${currentSong.video_id}/0.jpg`;
     else if (currentSong.thumbnails && currentSong.thumbnails.length > 0) cover = currentSong.thumbnails[0].url;
+
+    const now = Date.now();
+    const elapsed = now - lastMiniplayerPostRef.current;
+    if (elapsed < 1000) return; // throttle: ignora POSTs muito seguidos (progress contínuo)
+    lastMiniplayerPostRef.current = now;
 
     fetch('http://localhost:8000/api/miniplayer/state', {
       method: 'POST',
@@ -392,7 +401,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         duration
       })
     }).catch(() => {});
-    
+
   }, [currentSong, isPlaying, progress, duration, metadata]);
 
   // Log de telemetria do player (apenas quando faixa ou estado de play muda, nao a cada tick de progresso)
