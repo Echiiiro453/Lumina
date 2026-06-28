@@ -53,20 +53,28 @@ main_event_loop = None
 active_tasks = {}
 
 async def memory_reaper():
-    """Background task to clear old completed jobs from memory to prevent leaks."""
+    """Background task to clear old finished jobs from memory to prevent leaks.
+
+    Remove da RAM jobs que já terminaram (estados finais) há mais de 12h. Usa finished_at
+    (set em worker_loop ao concluir/errar) em vez de last_update, que nunca era escrito.
+    Antes esta função checava 'completed' — mas o downloader usa 'done', então ela nunca
+    limpara jobs concluídos.
+    """
+    FINAL_STATES = {"done", "completed", "error", "cancelled", "rate_limited", "timeout"}
     while True:
         await asyncio.sleep(3600)  # run every 1 hour
         now = time.time()
         stale_jobs = []
         for j_id, st in jobs.items():
-            if st.status in ["completed", "error", "cancelled", "rate_limited"]:
-                if now - st.last_update > 43200: # 12 hours
+            # Só reapaga jobs finalizados com finished_at antigo (>= 12h).
+            if st.status in FINAL_STATES and st.finished_at is not None:
+                if now - st.finished_at > 43200:  # 12 hours
                     stale_jobs.append(j_id)
-        
+
         for j_id in stale_jobs:
             jobs.pop(j_id, None)
             active_tasks.pop(j_id, None)
-        
+
         if stale_jobs:
             print(f"[\033[90mMemory Reaper\033[0m] Cleared {len(stale_jobs)} old jobs from RAM.")
 
