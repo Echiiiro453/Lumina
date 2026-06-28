@@ -858,7 +858,14 @@ async def convert_file(request: ConvertRequest):
             stderr=asyncio.subprocess.PIPE,
             creationflags=CREATE_NO_WINDOW
         )
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            raise HTTPException(status_code=504, detail="Conversão excedeu o tempo limite (10 min).")
 
         if process.returncode != 0:
             raise Exception(f"FFMPEG Error: {stderr.decode('utf-8', errors='ignore')}")
@@ -890,7 +897,10 @@ def _run_ffprobe(file_path: str, ffprobe_exe: str) -> dict:
         ffprobe_exe, "-v", "quiet", "-print_format", "json",
         "-show_streams", "-show_format", file_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=30)
+    except subprocess.TimeoutExpired:
+        return {}
     data = json.loads(result.stdout or "{}")
     audio_stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {})
     fmt = data.get("format", {})
@@ -1428,15 +1438,20 @@ def api_convert(req: ConvertRequest):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             creationflags=CREATE_NO_WINDOW,
-            text=True
+            text=True,
+            timeout=600
         )
-        
+
         if process.returncode != 0:
             print(f"FFmpeg error: {process.stderr}")
             raise HTTPException(status_code=500, detail="Erro na conversão do arquivo pelo FFmpeg.")
-            
+
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="FFmpeg não encontrado no sistema.")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Conversão excedeu o tempo limite (10 min).")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
         
