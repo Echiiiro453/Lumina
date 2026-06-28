@@ -24,12 +24,24 @@ def main():
     ]
     
     # Arquivos de dados (Estáticos do Frontend, Termos)
+    # NOTA: o path do vosk é resolvido dinamicamente (antes era hardcoded para a máquina
+    # do usuário 'andrey', o que quebrava o build em qualquer outra máquina).
+    # --collect-all vosk (mais abaixo) já coleta o pacote; este --add-data garante os
+    # dados extras (modelos nativos) caso existam no install local.
+    vosk_data = []
+    try:
+        import vosk as _vosk
+        vosk_data = [(os.path.dirname(_vosk.__file__), "vosk")]
+    except ImportError:
+        # vosk não instalado no ambiente de build; --collect-all cuidará do empacotamento
+        vosk_data = []
+
     datas = [
         ("static", "static"),
         ("../TERMS.md", "."),
         ("lyrics_fetcher.py", "."),
         ("icon.ico", "."),
-        ("C:/Users/andrey/AppData/Local/Programs/Python/Python310/Lib/site-packages/vosk", "vosk"),
+        *vosk_data,
         ("bgutil_server", "bgutil_server")
     ]
     
