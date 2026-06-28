@@ -5,6 +5,11 @@ from utils import get_data_dir
 
 DB_PATH = os.path.join(get_data_dir(), "downloads.db")
 
+# Cache de TTL para sync_db_with_disk: evita varredura completa do disco a cada
+# GET /api/library e /api/history (que chamam a função). Ver sync_db_with_disk().
+_sync_last_run_at = None
+_sync_last_dir = None
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -207,12 +212,25 @@ def get_download_record(playlist_id: str, video_id: str) -> dict:
     except:
         return None
 
-def sync_db_with_disk(downloads_dir: str) -> dict:
+def sync_db_with_disk(downloads_dir: str, force: bool = False) -> dict:
     """
     Varre todos os registros 'downloaded' no banco e verifica se os arquivos ainda existem no disco.
     Arquivos deletados sao marcados como 'missing' automaticamente.
     Também escaneia a pasta de downloads e importa arquivos de áudio órfãos para o banco.
+
+    Cache TTL: para evitar varredura completa do disco em cada GET /api/library e /api/history
+    (que chamam esta função), só re-roda no máximo a cada 30s — salvo force=True (uso manual
+    via /api/db/sync). A chave de cache inclui downloads_dir para respeitar configuração.
     """
+    global _sync_last_run_at, _sync_last_dir
+    ttl_seconds = 30
+    now = time.time()
+    if not force and _sync_last_run_at is not None and (now - _sync_last_run_at) < ttl_seconds \
+            and _sync_last_dir == downloads_dir:
+        # Dentro do TTL: pula a varredura pesada. Retorna cache neutro (zeros) — os dados
+        # de biblioteca/histórico vêm do banco, que já está sincronizado até aqui.
+        return {"checked": 0, "marked_missing": 0, "imported_local": 0, "skipped": True}
+
     checked = 0
     marked_missing = 0
     imported_local = 0
@@ -263,12 +281,16 @@ def sync_db_with_disk(downloads_dir: str) -> dict:
         
         conn.commit()
         conn.close()
-        
+
+        # Registra a execução no cache de TTL (apenas em sucesso).
+        _sync_last_run_at = time.time()
+        _sync_last_dir = downloads_dir
+
         msg = f"[DB SYNC] Concluido: {checked} verificados, {marked_missing} marcados ausentes, {imported_local} importados locais."
         print(msg)
     except Exception as e:
         print(f"Erro no sync_db_with_disk: {e}")
-    
+
     return {"checked": checked, "marked_missing": marked_missing, "imported_local": imported_local}
 
 

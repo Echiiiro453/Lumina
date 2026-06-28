@@ -173,7 +173,7 @@ async def get_logs():
 async def sync_db():
     """Syncs the DB with disk, marking deleted files as 'missing'."""
     from utils import get_downloads_dir
-    result = sync_db_with_disk(get_downloads_dir())
+    result = sync_db_with_disk(get_downloads_dir(), force=True)
     return {"status": "ok", **result}
 
 @app.get("/version")
