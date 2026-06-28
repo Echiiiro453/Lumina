@@ -514,10 +514,21 @@ class FetchLyricsRequest(BaseModel):
 
 @app.get("/api/tags/read")
 def api_read_tags(file_path: str):
-    return _tag_editor.read_tags(file_path)
+    from utils import safe_resolve, SafePathError
+    try:
+        safe = safe_resolve(file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _tag_editor.read_tags(safe)
 
 @app.post("/api/tags/save")
 def api_write_tags(req: TagWriteRequest):
+    from utils import safe_resolve, SafePathError
+    try:
+        req.file_path = safe_resolve(req.file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     data = {k: v for k, v in req.dict().items() if v is not None and k != "file_path"}
     result = _tag_editor.write_tags(req.file_path, data)
     
@@ -804,10 +815,13 @@ class ConvertRequest(BaseModel):
 @app.post("/api/convert")
 async def convert_file(request: ConvertRequest):
     try:
-        from utils import get_downloads_dir
-        input_path = request.input_path
-        if not os.path.exists(input_path):
-            raise HTTPException(status_code=404, detail="Arquivo original não encontrado.")
+        from utils import safe_resolve, SafePathError, get_downloads_dir
+        # input_path confinado à biblioteca (downloads dir). Antes aceitava qualquer path
+        # absoluto, permitindo converter/ler arquivos arbitrários do usuário via esta API.
+        try:
+            input_path = safe_resolve(request.input_path)
+        except SafePathError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         downloads_dir = get_downloads_dir()
         filename = os.path.basename(input_path)
@@ -1003,14 +1017,14 @@ async def spectral_analysis(req: SpectralAnalysisRequest):
     Returns: spectrogram (base64 PNG), cutoff_hz, quality_risk, metadata.
     """
     import subprocess, base64, tempfile
-    from utils import get_resource_path, get_downloads_dir
+    from utils import get_resource_path, safe_resolve, SafePathError
 
-    file_path = req.file_path
-    # Resolve relative paths (stored as bare filename in DB) the same way /api/track_metadata does
-    if not os.path.isabs(file_path) and not os.path.exists(file_path):
-        file_path = os.path.join(get_downloads_dir(), file_path)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    # file_path confinado à biblioteca (downloads dir). Antes aceitava paths absolutos
+    # arbitrários se existissem, permitindo analisar arquivos fora da biblioteca.
+    try:
+        file_path = safe_resolve(req.file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     ffmpeg_exe = get_resource_path("ffmpeg.exe")
     ffprobe_exe = get_resource_path("ffprobe.exe")
@@ -1124,10 +1138,11 @@ def get_miniplayer_state():
 @app.post("/api/open_external")
 def open_external(request: OpenExternalRequest):
     try:
-        from utils import get_downloads_dir
-        abs_path = os.path.join(get_downloads_dir(), request.file_path)
-        if not os.path.exists(abs_path):
-            raise HTTPException(status_code=404, detail="File not found")
+        from utils import safe_resolve, SafePathError
+        try:
+            abs_path = safe_resolve(request.file_path, allow_dirs=True)
+        except SafePathError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         if os.name == 'nt':
             os.startfile(abs_path)
         elif sys.platform == 'darwin':
@@ -1135,6 +1150,8 @@ def open_external(request: OpenExternalRequest):
         else:
             subprocess.call(('xdg-open', abs_path))
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1142,9 +1159,12 @@ def open_external(request: OpenExternalRequest):
 async def play_external(request: PlayExternalRequest):
     import os
     abs_path = os.path.abspath(request.file_path)
-    if not os.path.exists(abs_path):
+    # Este endpoint é acionado por associação de arquivo do SO (abrir com Lumina), então
+    # o arquivo pode estar em qualquer lugar escolhido pelo usuário — não confinamos a
+    # downloads_dir. Mas validamos que é um arquivo real (não diretório nem path malformado).
+    if not os.path.isfile(abs_path):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # Broadcast to frontend to play immediately
     await manager.broadcast_json({"type": "PLAY_EXTERNAL", "file_path": abs_path})
     
@@ -1244,19 +1264,22 @@ class FixMetadataRequest(BaseModel):
 @app.post("/api/fix_metadata")
 def fix_metadata(request: FixMetadataRequest):
     try:
-        from utils import get_downloads_dir
+        from utils import safe_resolve, SafePathError
         from shazam_fixer import fix_metadata_sync
-        
-        abs_path = os.path.join(get_downloads_dir(), request.file_path)
-        if not os.path.exists(abs_path):
-            raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
-            
+
+        try:
+            abs_path = safe_resolve(request.file_path)
+        except SafePathError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         result = fix_metadata_sync(abs_path)
         if result.get("success"):
             return {"status": "success", "data": result}
         else:
             raise HTTPException(status_code=400, detail=result.get("error", "Erro desconhecido"))
-            
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1356,22 +1379,25 @@ def api_choose_lrc_file():
 def api_convert(req: ConvertRequest):
     import subprocess
     import time
-    from utils import get_downloads_dir
-    
-    if not os.path.exists(req.input_path):
-        raise HTTPException(status_code=400, detail="Arquivo de entrada não encontrado.")
-        
+    from utils import get_downloads_dir, safe_resolve, SafePathError
+
+    # input_path confinado à biblioteca. Antes aceitava qualquer path absoluto.
+    try:
+        input_path = safe_resolve(req.input_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     valid_formats = ['mp3', 'wav', 'flac', 'm4a', 'ogg']
     if req.output_format.lower() not in valid_formats:
         raise HTTPException(status_code=400, detail="Formato de saída inválido.")
-        
-    filename = os.path.basename(req.input_path)
+
+    filename = os.path.basename(input_path)
     name_only = os.path.splitext(filename)[0]
-    
+
     downloads_dir = get_downloads_dir()
     converted_dir = os.path.join(downloads_dir, "converted")
     os.makedirs(converted_dir, exist_ok=True)
-    
+
     output_path = os.path.join(converted_dir, f"{name_only}_converted.{req.output_format.lower()}")
     
     # Se o arquivo já existir, adiciona timestamp
@@ -1381,7 +1407,7 @@ def api_convert(req: ConvertRequest):
     cmd = [
         'ffmpeg',
         '-y', # overwrite
-        '-i', req.input_path
+        '-i', input_path
     ]
     
     # Format specific options
@@ -1520,11 +1546,11 @@ oLink.Save
 @app.get("/api/track_metadata")
 def get_track_metadata(file_path: str):
     import base64
-    from utils import get_downloads_dir
-    abs_path = os.path.join(get_downloads_dir(), file_path)
-    
-    if not os.path.exists(abs_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    from utils import safe_resolve, SafePathError
+    try:
+        abs_path = safe_resolve(file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
         
     ext = os.path.splitext(abs_path)[1].lower()
     lyrics = ""
@@ -1694,18 +1720,25 @@ class ZipRequest(BaseModel):
 
 def create_zip_job(job_id, files_to_zip):
     try:
+        from utils import safe_resolve, SafePathError
         d_dir = get_downloads_dir()
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-        
+
         with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
             total = len(files_to_zip)
             for i, filename in enumerate(files_to_zip):
-                filepath = os.path.join(d_dir, filename)
+                # Cada filename deve resolver dentro da biblioteca (bloqueia ../../).
+                try:
+                    filepath = safe_resolve(filename, root=d_dir)
+                except SafePathError:
+                    # Pula arquivos que tentam escapar do diretório de downloads.
+                    zip_jobs[job_id]["progress"] = int(((i + 1) / total) * 100)
+                    continue
                 if os.path.exists(filepath):
-                    zf.write(filepath, filename)
+                    zf.write(filepath, os.path.basename(filename))
                 zip_jobs[job_id]["progress"] = int(((i + 1) / total) * 100)
                 zip_jobs[job_id]["current_file"] = filename
-                
+
         tmp.close()
         zip_jobs[job_id]["status"] = "done"
         zip_jobs[job_id]["filepath"] = tmp.name

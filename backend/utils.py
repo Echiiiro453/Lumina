@@ -1,6 +1,12 @@
 import os
 import sys
 
+
+class SafePathError(Exception):
+    """Levantada quando um file_path resolve para fora do diretório raiz permitido
+    (path traversal) ou não existe. Chamadores FastAPI devem converter em HTTPException."""
+    pass
+
 def get_base_dir():
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
@@ -110,3 +116,45 @@ def clean_url(url: str) -> str:
         return urllib.parse.urlunparse(parsed._replace(query=new_query))
     except:
         return url
+
+
+def safe_resolve(file_path, root=None, must_exist=True, allow_dirs=False):
+    """Resolve file_path de forma segura dentro de root (default: downloads dir).
+
+    Bloqueia path traversal (..) e paths absolutos que escapem do root. Resolve symlinks
+    via os.path.realpath antes de comparar com os.path.commonpath, evitando bypass por
+    links simbólicos.
+
+    - file_path: pode ser relativo (junta a root) ou absoluto (precisa estar dentro de root).
+    - root: diretório raiz permitido. Default get_downloads_dir().
+    - must_exist: se True (default), levanta SafePathError se o arquivo não existir.
+    - allow_dirs: se True, aceita diretórios (default exige arquivo regular).
+
+    Retorna o caminho absoluto (str) dentro de root.
+    Levanta SafePathError em caso de traversal/inexistência.
+    """
+    if root is None:
+        root = get_downloads_dir()
+    root_real = os.path.realpath(root)
+
+    candidate = file_path
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(root_real, candidate)
+    abs_path = os.path.realpath(candidate)
+
+    # commonpath exige que ambos existam; compara as strings de realpath para travessia.
+    try:
+        if os.path.commonpath([abs_path, root_real]) != root_real:
+            raise SafePathError("Caminho fora da biblioteca")
+    except ValueError:
+        # commonpath levanta ValueError se os paths estiverem em drives distintos (Windows)
+        raise SafePathError("Caminho fora da biblioteca")
+
+    if must_exist and not os.path.exists(abs_path):
+        raise SafePathError("Arquivo não encontrado")
+
+    if must_exist and not allow_dirs and not os.path.isfile(abs_path):
+        raise SafePathError("Caminho não é um arquivo")
+
+    return abs_path
+
