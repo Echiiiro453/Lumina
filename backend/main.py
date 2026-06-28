@@ -743,15 +743,32 @@ def get_auth_status():
 @app.post("/upload_cookies")
 async def upload_cookies(file: UploadFile = File(...)):
     try:
-        print(f"[Upload] Recebendo arquivo de cookies: {file.filename}")
+        # Lê o conteúdo em memória (limite de 2 MB) para validar antes de persistir.
+        # Antes o arquivo era copiado direto via shutil.copyfileobj sem nenhuma checagem.
+        MAX_COOKIE_SIZE = 2 * 1024 * 1024  # 2 MB
+        content = await file.read(MAX_COOKIE_SIZE + 1)
+        if len(content) > MAX_COOKIE_SIZE:
+            raise HTTPException(status_code=413, detail="Arquivo de cookies muito grande (máx 2 MB).")
+        if not content:
+            raise HTTPException(status_code=400, detail="Arquivo de cookies vazio.")
+
+        # Valida o header Netscape antes de gravar (o mesmo check que /auth_status faz).
+        try:
+            head = content[:1024].decode('utf-8', errors='ignore')
+        except Exception:
+            head = ""
+        if "# Netscape HTTP Cookie File" not in head and "# HTTP Cookie File" not in head:
+            raise HTTPException(status_code=400, detail="Formato inválido: esperado cabeçalho Netscape '# Netscape HTTP Cookie File'.")
+
         cookie_path = os.path.join(get_data_dir(), "cookies.txt")
-        print(f"[Upload] Salvando em: {cookie_path}")
-        
         with open(cookie_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        print("[Upload] Cookies salvos com sucesso!")
+            buffer.write(content)
+
+        # Log sem expor conteúdo do cookie.
+        print(f"[Upload] Cookies salvos em {cookie_path} ({len(content)} bytes)")
         return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Upload] Erro ao salvar cookies: {e}")
         raise HTTPException(status_code=500, detail=f"Erro no servidor: {str(e)}")
