@@ -185,11 +185,21 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
 
     class StdoutLogger:
         def debug(self, msg): pass
-        def warning(self, msg): 
-            # Imprime o aviso com cor cinza escuro para não poluir
+        def warning(self, msg):
+            # Imprime o aviso com cor cinza escuro para não poluir; mascara paths absolutos.
+            try:
+                from utils import sanitize_paths
+                msg = sanitize_paths(msg)
+            except Exception:
+                pass
             print(f"      \033[90m[yt-dlp:warn] {msg}\033[0m")
-        def error(self, msg): 
-            # Imprime erro com cor vermelha
+        def error(self, msg):
+            # Imprime erro com cor vermelha; mascara paths absolutos.
+            try:
+                from utils import sanitize_paths
+                msg = sanitize_paths(msg)
+            except Exception:
+                pass
             print(f"      \033[31m[yt-dlp:err] {msg}\033[0m")
 
     def local_progress_hook(d):

@@ -885,9 +885,21 @@ async def convert_file(request: ConvertRequest):
             raise HTTPException(status_code=504, detail="Conversão excedeu o tempo limite (10 min).")
 
         if process.returncode != 0:
-            raise Exception(f"FFMPEG Error: {stderr.decode('utf-8', errors='ignore')}")
+            # Sanitiza stderr antes de expor (paths absolutos vazam usuário/estrutura de pastas).
+            try:
+                from utils import sanitize_paths
+                err_msg = sanitize_paths(stderr.decode('utf-8', errors='ignore'))
+            except Exception:
+                err_msg = "FFmpeg conversion error"
+            raise Exception(f"FFMPEG Error: {err_msg}")
 
-        return {"status": "success", "output_path": output_path}
+        # Não retorna o path absoluto completo; só o basename relativo à biblioteca.
+        from utils import get_downloads_dir
+        try:
+            rel_out = os.path.relpath(output_path, get_downloads_dir())
+        except Exception:
+            rel_out = os.path.basename(output_path)
+        return {"status": "success", "output_path": rel_out}
     except Exception as e:
         print(f"Error in convert: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1460,7 +1472,13 @@ def api_convert(req: ConvertRequest):
         )
 
         if process.returncode != 0:
-            print(f"FFmpeg error: {process.stderr}")
+            # Sanitiza stderr antes de logar (paths absolutos vazam usuário/estrutura).
+            try:
+                from utils import sanitize_paths
+                err_log = sanitize_paths(process.stderr)
+            except Exception:
+                err_log = "FFmpeg conversion error"
+            print(f"FFmpeg error: {err_log}")
             raise HTTPException(status_code=500, detail="Erro na conversão do arquivo pelo FFmpeg.")
 
     except FileNotFoundError:
@@ -1471,10 +1489,16 @@ def api_convert(req: ConvertRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-        
+
+    # Não retorna o path absoluto completo; só o basename relativo à biblioteca.
+    try:
+        from utils import get_downloads_dir as _gdd
+        rel_out = os.path.relpath(output_path, _gdd())
+    except Exception:
+        rel_out = os.path.basename(output_path)
     return {
         "status": "success",
-        "output_path": output_path
+        "output_path": rel_out
     }
 
 @app.post("/api/upload_wallpaper")

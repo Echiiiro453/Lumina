@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 
 
@@ -103,6 +104,36 @@ def get_cookies_path():
     # Lumina.exe. Cookies ficam exclusivamente no data dir do usuário (via /upload_cookies).
     return None
 
+
+
+def sanitize_paths(text, root=None):
+    """Mascara paths absolutos em texto de log (yt-dlp/FFmpeg stderr) por <path>/basename.
+
+    stderr/stdout de subprocess frequentemente contêm o caminho absoluto do arquivo do
+    usuário (ex.: 'C:\\Users\\nome\\Music\\faixa.mp3'). Isso evita vazar o nome de usuário
+    e estrutura de pastas para o log buffer que é exposto em /api/logs.
+
+    Mantém o basename (útil p/ debug) e troca o diretório por <path>.
+    """
+    if not text:
+        return text
+    if root is None:
+        try:
+            root = get_downloads_dir()
+        except Exception:
+            root = None
+
+    def _mask(m):
+        full = m.group(0)
+        base = os.path.basename(full.rstrip("/\\"))
+        return f"<path>/{base}" if base else "<path>"
+
+    # Windows: letra:\...\ ; Unix: /home/... , /Users/... , /mnt|media|tmp|var|opt/...
+    pattern = r'(?:[A-Za-z]:[\\/][^\s"\']+|/(?:home|Users|mnt|media|tmp|var|opt)[^\s"\']*)'
+    out = re.sub(pattern, _mask, text)
+    if root:
+        out = out.replace(root, "<downloads>")
+    return out
 
 
 def clean_url(url: str) -> str:
