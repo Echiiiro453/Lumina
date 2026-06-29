@@ -374,10 +374,6 @@ class RetryRequest(BaseModel):
     playlist_id: str
     video_id: str
 
-@app.get("/download/jobs")
-async def get_all_jobs():
-    return {job_id: asdict(state) for job_id, state in jobs.items()}
-
 # --- Subscriptions API ---
 import subscriptions
 
@@ -676,14 +672,6 @@ def clean_url(url: str) -> str:
 
 
 
-
-
-
-@app.post("/open_folder")
-def open_folder():
-    downloads_dir = get_downloads_dir()
-    if os.path.exists(downloads_dir): os.startfile(downloads_dir)
-    return {"status": "opened"}
 
 
 
