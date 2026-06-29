@@ -180,47 +180,11 @@ def get_studio_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     return studio_jobs[job_id]
 
-def install_ai_worker(job_id: str):
-    try:
-        import urllib.request
-        import subprocess
-        from utils import get_data_dir
-        
-        studio_jobs[job_id] = {"status": "processing", "progress": 10, "message": "Baixando Python (30 MB)..."}
-        data_dir = get_data_dir()
-        installer_path = os.path.join(data_dir, "python_installer.exe")
-        
-        # Download Python if not present
-        if not os.path.exists(installer_path):
-            urllib.request.urlretrieve("https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe", installer_path)
-            
-        studio_jobs[job_id] = {"status": "processing", "progress": 30, "message": "Instalando Python no sistema..."}
-        
-        # Install Python silently
-        import subprocess
-        subprocess.run([installer_path, "/passive", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"], check=True)
-        
-        studio_jobs[job_id] = {"status": "processing", "progress": 50, "message": "Instalando Motor de IA (Download de 2.5 GB, aguarde)..."}
-        
-        # Find Python executable
-        local_app_data = os.environ.get('LOCALAPPDATA', '')
-        python_exe = os.path.join(local_app_data, "Programs", "Python", "Python310", "python.exe")
-        if not os.path.exists(python_exe):
-            python_exe = "python" # fallback to path
-            
-        subprocess.run([python_exe, "-m", "pip", "install", "demucs"], check=True)
-        
-        studio_jobs[job_id] = {"status": "success", "progress": 100, "message": "Inteligência Artificial instalada com sucesso!"}
-    except Exception as e:
-        print(f"Erro na instalacao da IA: {e}")
-        studio_jobs[job_id] = {"status": "error", "progress": 0, "message": f"Falha na instalação: {str(e)}"}
-
-@router.post("/api/studio/install")
-async def studio_install(background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    studio_jobs[job_id] = {"status": "starting", "progress": 0, "message": "Iniciando instalação..."}
-    background_tasks.add_task(install_ai_worker, job_id)
-    return {"job_id": job_id}
+def install_ai_worker_REMOVED(job_id: str):
+    # REMOVIDO em PR 6.2: esta função era usada apenas pela 1ª definição de
+    # /api/studio/install, que era sombreada pela 2ª (a vencedora). Mantida como stub
+    # vazio só para evitar quebrar imports eventuais; a lógica real está em run_install_demucs.
+    pass
 
 async def run_install_full(job_id: str):
     import subprocess
