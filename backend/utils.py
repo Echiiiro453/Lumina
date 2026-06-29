@@ -97,10 +97,10 @@ def get_cookies_path():
     user_path = os.path.join(get_data_dir(), 'cookies.txt')
     if os.path.exists(user_path):
         return user_path
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        bundled_path = os.path.join(sys._MEIPASS, 'cookies.txt')
-        if os.path.exists(bundled_path):
-            return bundled_path
+    # NOTA: o fallback _MEIPASS/cookies.txt foi removido propositalmente. Cookies NUNCA
+    # devem vir de dentro do executável empacotado — se alguém deixar um cookies.txt ao
+    # lado do source na hora do build, ele seria embutido e a sessão vazaria dentro do
+    # Lumina.exe. Cookies ficam exclusivamente no data dir do usuário (via /upload_cookies).
     return None
 
 

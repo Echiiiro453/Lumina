@@ -106,6 +106,15 @@ def main():
         "--collect-all", "yt_dlp_plugins"
     ]
     
+    # DEFENSIVO: aborta o build se houver um cookies.txt ao lado do source. Ele poderia
+    # acabar empacotado no exe (datas/collect-all por engano) e vazar a sessão do usuário.
+    stray_cookies = os.path.join(base_dir, "cookies.txt")
+    if os.path.exists(stray_cookies):
+        raise SystemExit(
+            f"BUILD ABORTADO: encontrado {stray_cookies} ao lado do source. "
+            "Cookies NUNCA devem ser empacotados no executável. Remova o arquivo antes de buildar."
+        )
+
     for src, dst in binaries:
         if os.path.exists(os.path.join(base_dir, src)):
             cmd.extend(["--add-binary", f"{src};{dst}"])
