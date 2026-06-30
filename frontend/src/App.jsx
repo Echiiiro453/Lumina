@@ -12,6 +12,7 @@ import axios from 'axios';
 import { WindowControls } from './components/WindowControls';
 import qrcodeImg from './assets/qrcode_custom.jpg';
 import { applyThemeFromImage, resetTheme } from './utils/theme';
+import { isCompleted, isError, isTerminal } from './utils/downloadStatus';
 
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
@@ -246,7 +247,7 @@ function App() {
       const saved = localStorage.getItem('saved_queue');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const pendingItems = parsed.filter(item => item.status !== 'completed' && item.status !== 'error');
+        const pendingItems = parsed.filter(item => !isTerminal(item.status));
         if (pendingItems.length > 0) {
           setSavedQueueData(parsed);
           setShowResumePrompt(true);
@@ -536,7 +537,8 @@ function App() {
             total: job.total_bytes_str
           });
         }
-        if (job.status === 'done') {
+        // R2.5: o backend usa `done`; aceitar também `completed` (legado da UI).
+        if (isCompleted(job.status)) {
           if (startNextConsecutiveDownload(false)) return;
           setDownloadInfo({
             status: 'success',
@@ -547,7 +549,7 @@ function App() {
           addToast(t('statusDone') || 'Download concluído!', 'success', { label: t('openFolder'), onClick: openDownloadsFolder });
           setStep('result');
           setCurrentJobId(null);
-        } else if (job.status === 'error' || job.status === 'timeout') {
+        } else if (isError(job.status)) {
           if (startNextConsecutiveDownload(true)) return;
           addToast(t('statusError') || 'Falha no download.', 'error');
           // R2.4: ramifica a dica pelo error_code estável (backend), em vez de chutar
@@ -1137,7 +1139,7 @@ function App() {
               </div>
               <h2 className="text-2xl font-bold">{t('resumeTitle')}</h2>
               <p className="text-secondary text-sm">
-                {t('resumeDesc', savedQueueData.filter(i => i.status !== 'completed' && i.status !== 'error').length)}
+                {t('resumeDesc', savedQueueData.filter(i => !isTerminal(i.status)).length)}
               </p>
               
               <div className="flex gap-4 w-full">
@@ -1153,7 +1155,7 @@ function App() {
                 <RippleButton
                   onClick={() => {
                     const queueToRestore = savedQueueData.map(item => {
-                      if (item.status !== 'completed' && item.status !== 'error') {
+                      if (!isTerminal(item.status)) {
                         return { ...item, status: 'pending', progress: 0, jobId: null };
                       }
                       return item;
@@ -2044,7 +2046,7 @@ function App() {
           <div className="relative">
             <List size={24} />
             <div className="absolute -top-2 -right-2 bg-white text-black text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-md">
-              {queue.filter(i => i.status !== 'completed').length}
+              {queue.filter(i => !isTerminal(i.status)).length}
             </div>
           </div>
           <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-medium whitespace-nowrap">
