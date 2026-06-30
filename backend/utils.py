@@ -189,3 +189,17 @@ def safe_resolve(file_path, root=None, must_exist=True, allow_dirs=False):
 
     return abs_path
 
+
+def raise_with_code(status_code: int, detail: str, code=None):
+    """Ergue um HTTPException com `code` estável além de `detail` (R2.4).
+
+    `code` viaja pelo header X-Error-Code, que o handler global em main.py devolve no
+    JSON como {"detail": ..., "code": ...}. `code=None` (default) mantém o comportamento
+    antigo — usar só onde já se sabe classificar (ex: AUTH_REQUIRED / RATE_LIMITED).
+    Importo HTTPException aqui dentro para manter utils.py sem depender de FastAPI no
+    top-level (utils é importado cedo, inclusive por módulos sem app FastAPI).
+    """
+    from fastapi import HTTPException
+    headers = {"X-Error-Code": code} if code else None
+    raise HTTPException(status_code=status_code, detail=detail, headers=headers)
+

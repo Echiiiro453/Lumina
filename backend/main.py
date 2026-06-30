@@ -64,6 +64,20 @@ from urllib.parse import urlparse
 
 app = FastAPI()
 
+# R2.4: padroniza o payload de erro HTTP como {"detail": ..., "code": ...}.
+# `code` é lido do header X-Error-Code (setado por helpers que sabem classificar, ex:
+# cookies/limite); quando ausente fica null — 100% retrocompatível (quem lê só `detail`
+# continua funcionando). Não intercepta ValidationError (FastAPI já tem handler próprio).
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    code = getattr(exc, "headers", None) or {}
+    if isinstance(code, dict):
+        code = code.get("X-Error-Code")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": code},
+    )
+
 from routers.downloads import router as downloads_router
 from routers.library import router as library_router
 from routers.settings import router as settings_router

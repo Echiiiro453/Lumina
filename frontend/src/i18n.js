@@ -46,6 +46,12 @@ const translations = {
     cancelDownload: 'Cancelar',
     retryDownload: 'Tentar novamente',
 
+    // ── Dicas de erro por error_code (R2.4)
+    errHintAuthRequired: '⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.',
+    errHintRateLimited: '⚠️ Dica: O YouTube limitou a sua conexão (429). Aguarde alguns minutos e tente novamente.',
+    errHintFormatNotFound: '⚠️ Dica: O formato pedido não está disponível para este vídeo. Tente outra qualidade.',
+    errHintTimeout: '⚠️ Dica: O download excedeu o tempo limite (4h). Tente novamente ou use um formato menor.',
+
     // ── Playlist
     playlistTitle: 'Gerenciar Playlist',
     playlistLoad: 'Carregar Playlist',
@@ -313,6 +319,12 @@ const translations = {
     statusCancelled: 'Cancelled',
     cancelDownload: 'Cancel',
     retryDownload: 'Retry',
+
+    // ── Error hints by error_code (R2.4)
+    errHintAuthRequired: '⚠️ Tip: You are not logged in (cookies.txt). Go to Settings, add your cookies and try again. YouTube blocks downloads without login.',
+    errHintRateLimited: '⚠️ Tip: YouTube throttled your connection (429). Wait a few minutes and try again.',
+    errHintFormatNotFound: '⚠️ Tip: The requested format is unavailable for this video. Try another quality.',
+    errHintTimeout: '⚠️ Tip: The download exceeded the time limit (4h). Try again or use a smaller format.',
 
     // ── Playlist
     playlistTitle: 'Manage Playlist',

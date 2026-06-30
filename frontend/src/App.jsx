@@ -27,6 +27,27 @@ import MobileSyncModal from './components/MobileSyncModal';
 import { SubscriptionsModal } from './components/SubscriptionsModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { SkeletonCard, SkeletonPlaylistItem, QualityOption, ToastContainer } from './components/UIComponents';
+
+// R2.4: mapeia o error_code estável do backend (JobState.error_code) para uma dica de UI
+// acionável. Retorna string (já localizada) ou '' quando não há dica — assim o chamador
+// nunca cola a dica cega de cookies para erros que não são de login. Antes a UI chutava
+// pela ausência de login (!isAuthenticated), o que era incorreto para 429/formato/etc.
+const errorHint = (code, tt) => {
+  switch (code) {
+    case 'AUTH_REQUIRED':
+      return tt('errHintAuthRequired') || '⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.';
+    case 'RATE_LIMITED':
+      return tt('errHintRateLimited') || '⚠️ Dica: O YouTube limitou a sua conexão (429). Aguarde alguns minutos e tente novamente.';
+    case 'FORMAT_NOT_FOUND':
+      return tt('errHintFormatNotFound') || '⚠️ Dica: O formato pedido não está disponível para este vídeo. Tente outra qualidade.';
+    case 'TIMEOUT':
+      return tt('errHintTimeout') || '⚠️ Dica: O download excedeu o tempo limite (4h). Tente novamente ou use um formato menor.';
+    default:
+      // DOWNLOAD_FAILED / UNKNOWN / sem código: sem dica específica — só a mensagem do backend.
+      return '';
+  }
+};
+
 // Helper para detectar modo automaticamente (Music vs Video)
 const detectMode = (url) => {
   if (!url) return 'video';
@@ -529,10 +550,11 @@ function App() {
         } else if (job.status === 'error' || job.status === 'timeout') {
           if (startNextConsecutiveDownload(true)) return;
           addToast(t('statusError') || 'Falha no download.', 'error');
+          // R2.4: ramifica a dica pelo error_code estável (backend), em vez de chutar
+          // pela ausência de login. O corpo (job.error) continua sendo a mensagem do backend.
           let errMsg = job.error || t('statusError');
-          if (!isAuthenticated) {
-            errMsg += "\n\n⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.";
-          }
+          const hint = errorHint(job.error_code, t);
+          if (hint) errMsg += '\n\n' + hint;
           setMessage(errMsg);
           setStatus('error');
           setStep('confirm');
