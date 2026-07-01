@@ -60,15 +60,15 @@ A worktree já contém modificações e arquivos não rastreados **anteriores** 
 Eles **não serão commitados** por esta sequência de PRs. Mapeamento:
 
 ### Arquivos NÃO rastreados (untracked) — **não commitar**
-- `INDEX.md`, `autoeq_main.js`, `extract_json.js`, `extract_urls.js`, `fix_unreachable.js`
-- `force_probe.js`, `force_probe2.js`, `improve_probe.js`
-- `instrument.js`, `instrument_playerbar.js`, `instrument_renders.js`,
-  `instrument_telemetry.js`, `instrument_worklets.js`
-- `test_autoeq.js`, `test_urls.js`
 - `deno.zip` (não aparece no status atual; presente em `.gitignore`)
-- `tests/manual/audio-lag-investigation.md`
-- `frontend/src/utils/audioLagProbe.js` (arquivo de probe — será trabalhado no PR 1.1)
 - `docs/risks-and-improvements.md` (documento de riscos já criado)
+
+> **Fase 7 (limpeza) concluída:** os scripts auxiliares órfãos do root do repo
+> (`INDEX.md`, `autoeq_main.js`, `extract_*.js`, `test_*.js`, `force_probe*.js`,
+> `improve_probe.js`, `fix_unreachable.js`, `instrument*.js`) foram **removidos**.
+> Eram artefatos de instrumentação/debug descartáveis produzidos antes desta sequência
+> de PRs. `frontend/src/utils/audioLagProbe.js` foi tratado no PR 1.1 (debug desligado
+> em produção) e o template de teste manual está em `tests/manual/audio-lag-investigation.md`.
 
 ### Artefatos de build regenerados pelo baseline build
 - `backend/static/assets/index-DLpznR19.js` (novo)
