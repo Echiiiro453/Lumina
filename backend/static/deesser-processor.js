@@ -6,6 +6,7 @@
 class DeEsserProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.active = false;
         const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
@@ -34,6 +35,7 @@ class DeEsserProcessor extends AudioWorkletProcessor {
 
     // Runtime-adjustable via port
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.threshold !== undefined) this.threshold = e.data.threshold;
     };
@@ -110,8 +112,7 @@ class DeEsserProcessor extends AudioWorkletProcessor {
         const peakEnv = this._dbgMaxEnv;
         const gainReductionDb = 20 * Math.log10(this._dbgMinGain + 1e-12);
         
-        this.port.postMessage({
-          type: 'telemetry',
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: 'DeEsser',
           inRMS: inRMS.toFixed(3),
           peakEnv: peakEnv.toFixed(3),

@@ -8,6 +8,7 @@
 class CrossfeedProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
 
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
 
@@ -61,6 +62,7 @@ class CrossfeedProcessor extends AudioWorkletProcessor {
     this.crossfeedAmount = 0.25; // Nível padrão (0.0 a 1.0)
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.crossfeedAmount !== undefined) {
         this.crossfeedAmount = Math.max(0, Math.min(e.data.crossfeedAmount, 1.0));
       }

@@ -12,6 +12,7 @@
 class ExciterProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     this.amount = 0.5; // Default amount 0 to 1
@@ -40,6 +41,7 @@ class ExciterProcessor extends AudioWorkletProcessor {
     
     this.active = false;
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.amount !== undefined) {
         this.amount = Math.max(0, Math.min(e.data.amount, 1.0));
