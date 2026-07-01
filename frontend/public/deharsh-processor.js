@@ -8,6 +8,7 @@
 class DeHarshProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     this.sr = sr;
     
@@ -39,6 +40,7 @@ class DeHarshProcessor extends AudioWorkletProcessor {
     this.currReleaseCoeff = Math.exp(-1.0 / (sr * 0.120));
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.threshold !== undefined) this.threshold = Math.max(0.001, Math.min(e.data.threshold, 0.5));
@@ -169,8 +171,7 @@ class DeHarshProcessor extends AudioWorkletProcessor {
         const overshoot = Math.max(0, peakEnv - this.threshold);
         const dynamicCutDb = 20 * Math.log10(this._dbgMinK + 1e-12);
         
-        this.port.postMessage({
-          type: 'telemetry',
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: 'DeHarsh',
           peakEnv: peakEnv.toFixed(3),
           threshold: this.threshold.toFixed(3),

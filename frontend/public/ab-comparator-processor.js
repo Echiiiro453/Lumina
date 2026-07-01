@@ -2,6 +2,7 @@
 class ABComparatorProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.blend = 1.0; // 0 = Ref (A), 1 = Processed (B)
     this.mode = 'PROCESSED'; // 'RAW', 'CALIBRATED', 'PROCESSED'
     
@@ -11,6 +12,7 @@ class ABComparatorProcessor extends AudioWorkletProcessor {
     this.sumSquaresDiff = 0;
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.blend !== undefined) this.blend = e.data.blend;
       if (e.data.mode !== undefined) this.mode = e.data.mode;
     };
@@ -78,8 +80,7 @@ class ABComparatorProcessor extends AudioWorkletProcessor {
        const rmsB = Math.sqrt(this.sumSquaresB / this.frameCount);
        const rmsDiff = Math.sqrt(this.sumSquaresDiff / this.frameCount);
        
-       this.port.postMessage({
-          type: 'telemetry',
+       if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           refRMS: rmsA,
           procRMS: rmsB,
           diffRMS: rmsDiff

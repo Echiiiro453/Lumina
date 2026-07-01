@@ -520,6 +520,9 @@ Duplicados confirmados por leitura:
 - `POST /info` em `stream.py`
 - `POST /playlist/details` em `stream.py`
 - `POST /api/studio/install` em `studio.py`
+- `GET/POST /api/miniplayer/state` em `main.py` e `backend/miniplayer.py` (pré-existente em `main`; fora do escopo da fase de deduplicação atual).
+
+Observação sobre miniplayer: o router `backend/miniplayer.py` é incluído em `main.py` antes das definições `@app.post/@app.get("/api/miniplayer/state")`. Como o FastAPI despacha na ordem de registro, a versão simples de `miniplayer.py` vence. Consequentemente, a versão de `main.py` (que integra Discord RPC) é código morto — o `discord_rpc.update_presence(...)` nunca é chamado por esse caminho. O frontend posta `{title, artist, cover_url, isPlaying, progress, duration}`, compatível com `MiniPlayerState` em `miniplayer.py`.
 
 Suspeitos/não confirmados:
 

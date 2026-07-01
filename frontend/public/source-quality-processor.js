@@ -5,6 +5,8 @@
 class SourceQualityProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
+    this.port.onmessage = (e) => { if (e.data && e.data.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; } };
     this.clipCount = 0;
     this.peakSq = 0;
     this.sumSq = 0;
@@ -101,8 +103,7 @@ class SourceQualityProcessor extends AudioWorkletProcessor {
         qualityRisk = "VOLUME_BAIXO";
       }
 
-      this.port.postMessage({
-        type: "telemetry",
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: "SourceQuality",
         peakDb: peakDb.toFixed(1),
         rmsDb: rmsDb.toFixed(1),

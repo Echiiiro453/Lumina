@@ -7,6 +7,7 @@
 class RoomTelemetryProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
 
     this.preset = "Estúdio";
     this.material = "Madeira";
@@ -45,6 +46,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
     }
 
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       const d = e.data || {};
       if (d.preset !== undefined) this.preset = d.preset;
       if (d.material !== undefined) this.material = d.material;
@@ -196,8 +198,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
       
       if (drySilent && wetSilent) {
         // Envia log silencioso para limpar UI e não calcula Mono Loss falso
-        this.port.postMessage({
-          type: "telemetry",
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: "Room",
           preset: this.preset,
           material: this.material,
@@ -248,8 +249,7 @@ class RoomTelemetryProcessor extends AudioWorkletProcessor {
 
       const tailResidual = drySilent && !wetSilent;
 
-      this.port.postMessage({
-        type: "telemetry",
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: "Room",
         preset: this.preset,
         material: this.material,
