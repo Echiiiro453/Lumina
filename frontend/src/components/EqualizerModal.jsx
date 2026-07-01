@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { probeCount } from "../utils/audioLagProbe";
 import { motion, AnimatePresence } from 'framer-motion';
 import { SlidersHorizontal, X, RefreshCw, Check } from 'lucide-react';
 import { EQ_BANDS, EQ_PRESETS, SOUND_PRESETS } from './equalizerConstants';
@@ -193,7 +194,96 @@ export function EqualizerModal({
   presetIntensity, setPresetIntensity,
   setPresetHeadroomConfig, onPresetApplied
 }) {
+  probeCount("renders", "EqualizerModal");
   const [activeTab, setActiveTab] = useState('eq');
+
+  // AutoEQ Cloud Browser State
+  const [cloudHeadphones, setCloudHeadphones] = useState([]);
+  const [cloudSearch, setCloudSearch] = useState('');
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [cloudError, setCloudError] = useState(null);
+
+  // Fetch AutoEQ Index
+  useEffect(() => {
+    if (isOpen && cloudHeadphones.length === 0 && !isCloudLoading) {
+      setIsCloudLoading(true);
+      setCloudError(null);
+      fetch('https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/INDEX.md')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch AutoEQ index');
+          return res.text();
+        })
+        .then(text => {
+          const lines = text.split('\n');
+          const headphones = [];
+          for (const line of lines) {
+            // Match: - [Name](./path/to/folder) by Source on Target
+            const match = line.match(/^- \[(.+?)\]\(\.\/(.+?)\) by/);
+            if (match) {
+              headphones.push({
+                name: match[1],
+                path: match[2],
+                encodedName: match[2].split('/').pop()
+              });
+            }
+          }
+          setCloudHeadphones(headphones);
+          setIsCloudLoading(false);
+        })
+        .catch(err => {
+          console.error('Error fetching AutoEQ index:', err);
+          setCloudError(err.message);
+          setIsCloudLoading(false);
+        });
+    }
+  }, [isOpen, cloudHeadphones.length, isCloudLoading]);
+
+  const downloadCloudProfile = async (headphone) => {
+    try {
+      setIsDownloading(true);
+      // Format uses the already encoded path parts directly from INDEX.md
+      const wavUrl = `https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/${headphone.path}/${headphone.encodedName}%20minimum%20phase%2044100Hz.wav`;
+      const txtUrl = `https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/${headphone.path}/${headphone.encodedName}%20ParametricEQ.txt`;
+
+      // Try WAV first
+      const wavRes = await fetch(wavUrl);
+      if (wavRes.ok) {
+        const buf = await wavRes.arrayBuffer();
+        if (setAutoEqProfile) {
+          setAutoEqProfile({
+            id: headphone.name,
+            name: headphone.name,
+            source: 'AutoEQ WAV',
+            _arrayBuffer: buf,
+            preampDb: -0.7,
+            filters: [],
+            maxBoostDb: 0,
+            safety: 'OK',
+          });
+        }
+        setIsDownloading(false);
+        return;
+      }
+      
+      // Fallback to TXT
+      const txtRes = await fetch(txtUrl);
+      if (txtRes.ok) {
+        const text = await txtRes.text();
+        if (setAutoEqProfile) {
+          setAutoEqProfile(parseAutoEqTxt(text, { name: headphone.name, id: headphone.name }));
+        }
+        setIsDownloading(false);
+        return;
+      }
+      
+      throw new Error('No profile found (WAV or TXT)');
+    } catch (e) {
+      console.error('Download error:', e);
+      alert('Falha ao baixar perfil: ' + e.message);
+      setIsDownloading(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -479,10 +569,60 @@ export function EqualizerModal({
                   </div>
 
                   {!autoEqProfile ? (
-                    <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
-                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)] mb-4 text-center">Importe um preset do AutoEQ (.txt)<br/>ou um Impulse Response (.wav)<br/>para corrigir seu fone de ouvido.</p>
-                      <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] rounded-full text-xs font-bold hover:shadow-lg transition-all">
-                        Carregar Preset
+                    <div className="flex flex-col items-center justify-center p-6 border-2 border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
+                      
+                      <div className="w-full mb-6">
+                        <div className="relative mb-4">
+                          <input 
+                            type="text" 
+                            placeholder="Buscar no AutoEQ (ex: Moondrop Aria)..."
+                            value={cloudSearch}
+                            onChange={(e) => setCloudSearch(e.target.value)}
+                            className="w-full bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] text-sm px-4 py-3 rounded-full border border-[var(--md-sys-color-outline-variant)] focus:outline-none focus:border-[var(--md-sys-color-primary)] placeholder-[var(--md-sys-color-on-surface-variant)]/50 transition-colors"
+                          />
+                          {isCloudLoading && (
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--md-sys-color-primary)] border-t-transparent rounded-full animate-spin"></div>
+                          )}
+                        </div>
+
+                        {cloudError && (
+                          <div className="text-xs text-[var(--md-sys-color-error)] text-center mb-4 p-2 bg-[var(--md-sys-color-error)]/10 rounded-lg">
+                            Erro ao carregar catálogo: {cloudError}
+                          </div>
+                        )}
+
+                        <div className="max-h-[200px] overflow-y-auto custom-scrollbar rounded-lg border border-[var(--md-sys-color-outline-variant)]/20 bg-[var(--md-sys-color-surface-container-low)]">
+                          {cloudHeadphones.length > 0 && cloudSearch.length > 1 ? (
+                            cloudHeadphones
+                              .filter(h => h.name.toLowerCase().includes(cloudSearch.toLowerCase()))
+                              .slice(0, 50)
+                              .map((h, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => downloadCloudProfile(h)}
+                                  disabled={isDownloading}
+                                  className="w-full text-left px-4 py-3 hover:bg-[var(--md-sys-color-primary)]/10 text-sm border-b border-[var(--md-sys-color-outline-variant)]/10 last:border-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group flex justify-between items-center"
+                                >
+                                  <span className="text-[var(--md-sys-color-on-surface)] font-medium group-hover:text-[var(--md-sys-color-primary)] transition-colors">{h.name}</span>
+                                  <span className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] uppercase tracking-wider bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 rounded">Download</span>
+                                </button>
+                              ))
+                          ) : (
+                            <div className="p-8 text-center text-xs text-[var(--md-sys-color-on-surface-variant)]/70">
+                              {cloudHeadphones.length > 0 ? "Digite para buscar milhares de fones de ouvido..." : "Carregando catálogo..."}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center w-full gap-4 mb-4">
+                        <div className="flex-1 h-px bg-[var(--md-sys-color-outline-variant)]/30"></div>
+                        <span className="text-[10px] uppercase font-bold text-[var(--md-sys-color-on-surface-variant)]">OU</span>
+                        <div className="flex-1 h-px bg-[var(--md-sys-color-outline-variant)]/30"></div>
+                      </div>
+
+                      <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)] rounded-full text-xs font-bold hover:bg-[var(--md-sys-color-surface-container-highest)] transition-all">
+                        Carregar Arquivo Local (.txt ou .wav)
                         <input type="file" accept=".txt,.wav" onChange={handleFileUpload} className="hidden" />
                       </label>
                     </div>
