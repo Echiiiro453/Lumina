@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { List, X, Trash2, PlayCircle, CheckCircle2, Clock, Loader2, AlertCircle } from 'lucide-react';
 import { RippleButton } from './Ripple';
 import { QueueItem } from './QueueItem';
+import { isCompleted, isError } from '../utils/downloadStatus';
 
 const QueueDrawer = ({
   showQueue,
@@ -22,12 +23,12 @@ const QueueDrawer = ({
     total: queue.length,
     pending: queue.filter(i => i.status === 'pending' || i.status === 'queued').length,
     downloading: queue.filter(i => i.status === 'downloading' || i.status === 'running' || i.status === 'processing').length,
-    completed: queue.filter(i => i.status === 'done' || i.status === 'completed').length,
-    error: queue.filter(i => i.status === 'error' || i.status === 'timeout').length,
+    completed: queue.filter(i => isCompleted(i.status)).length,
+    error: queue.filter(i => isError(i.status)).length,
   }), [queue]);
 
   const clearCompleted = () => {
-    setQueue(prev => prev.filter(i => i.status !== 'done' && i.status !== 'completed'));
+    setQueue(prev => prev.filter(i => !isCompleted(i.status)));
   };
 
   const clearAll = () => setQueue([]);

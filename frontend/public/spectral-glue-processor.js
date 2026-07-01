@@ -10,6 +10,7 @@
 class SpectralGlueProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     this.active = false; // Default disabled, toggleable
@@ -42,6 +43,7 @@ class SpectralGlueProcessor extends AudioWorkletProcessor {
     this.varR = 0.001;
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.threshold !== undefined) this.thresholdDb = Math.max(-48.0, Math.min(e.data.threshold, -6.0));
     };

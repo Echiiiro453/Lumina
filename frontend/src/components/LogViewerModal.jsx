@@ -1,32 +1,58 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { probeCount } from "../utils/audioLagProbe";
 import { motion } from 'framer-motion';
 import { X, Terminal, Copy, Check } from 'lucide-react';
 import axios from 'axios';
+import { isAudioTelemetryLine, MAX_VISIBLE_LOGS } from './playerConstants';
 
 export function LogViewerModal({ isOpen, onClose, apiUrl }) {
+  probeCount("renders", "LogViewerModal");
   const [logs, setLogs] = useState([]);
   const [copied, setCopied] = useState(false);
   const logsEndRef = useRef(null);
 
   useEffect(() => {
-    let interval;
-    if (isOpen) {
-      const fetchLogs = async () => {
-        try {
-          const res = await axios.get(`${apiUrl}/api/logs`);
-          if (res.data && res.data.logs) {
-            setLogs(res.data.logs);
-          }
-        } catch (e) {
-          console.error("Failed to fetch logs", e);
+    if (!isOpen) return;
+
+    const fetchLogs = async () => {
+      try {
+        const res = await axios.get(`${apiUrl}/api/logs`);
+        if (res.data && res.data.logs) {
+          setLogs(res.data.logs
+            .filter((line) => !isAudioTelemetryLine(null, line))
+            .slice(-MAX_VISIBLE_LOGS));
         }
-      };
+      } catch (e) {
+        console.error("Failed to fetch logs", e);
+      }
+    };
 
-      fetchLogs(); // initial fetch
+    let interval = null;
+    const startPolling = () => {
+      if (interval) return;
+      fetchLogs(); // busca imediata ao (re)iniciar
       interval = setInterval(fetchLogs, 1500); // Poll every 1.5s
-    }
+    };
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
 
-    return () => clearInterval(interval);
+    // Pausa o polling quando a aba/janela fica oculta (economiza CPU/rede)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') startPolling();
+      else stopPolling();
+    };
+
+    if (document.visibilityState === 'visible') startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopPolling();
+    };
   }, [isOpen, apiUrl]);
 
   useEffect(() => {

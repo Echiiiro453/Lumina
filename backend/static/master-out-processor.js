@@ -8,6 +8,7 @@ const getWallClockMs = () => {
 class MasterOutProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.ceiling = Math.pow(10, -1.0 / 20); // ~0.891
     this.peakSq = 0;
     this.prePeakSq = 0;
@@ -30,6 +31,7 @@ class MasterOutProcessor extends AudioWorkletProcessor {
     this.lastErrorMs = 0;
 
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.truePeakMode !== undefined) {
         this.truePeakMode = e.data.truePeakMode;
       }
@@ -206,8 +208,7 @@ class MasterOutProcessor extends AudioWorkletProcessor {
         const performanceSupported = (typeof performance !== "undefined" && typeof performance.now === "function");
         const cpuTimingQuality = performanceSupported ? "HIGH RES" : "LOW RES";
 
-        this.port.postMessage({
-          type: "telemetry",
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: "MasterOut",
           peakDb: peakDb.toFixed(1),
           peakPreMasterDb: prePeakDb.toFixed(1),

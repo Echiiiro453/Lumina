@@ -10,6 +10,15 @@ export default function MobileSyncModal({ isOpen, onClose }) {
   const [error, setError] = useState(null);
   const [token, setToken] = useState(null);
   const [pendingDevice, setPendingDevice] = useState(null);
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
+    if (isOpen) {
+      setLoading(true);
+      setError(null);
+    }
+  }
 
   const handleApprove = () => {
     fetch(`http://localhost:8000/api/mobile/token/approve?token=${token}`, { method: 'POST' })
@@ -19,9 +28,6 @@ export default function MobileSyncModal({ isOpen, onClose }) {
 
   useEffect(() => {
     if (isOpen) {
-      setLoading(true);
-      setError(null);
-      
       Promise.all([
         fetch('http://localhost:8000/api/network/ip').then(res => res.json()),
         fetch('http://localhost:8000/api/mobile/token/create', { method: 'POST' }).then(res => res.json())

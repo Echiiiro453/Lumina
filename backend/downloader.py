@@ -20,6 +20,34 @@ FORMAT_ERRORS = ("Requested format is not available", "requested format is not a
 def is_match(err_msg: str, fragments) -> bool:
     return any(f.lower() in err_msg.lower() for f in fragments)
 
+# Códigos de erro estáveis (R2.4). Ortogonais ao `status` do job — o frontend ramifica
+# a UI por eles em vez de adivinhar pela mensagem free-text. `None` = não classificado.
+# Manter estes valores/strings estáveis: são parte do contrato com a UI.
+ERROR_CODE_AUTH_REQUIRED = "AUTH_REQUIRED"        # login/cookies necessários (403/login)
+ERROR_CODE_RATE_LIMITED = "RATE_LIMITED"          # 429 / bloqueio temporário de IP
+ERROR_CODE_FORMAT_NOT_FOUND = "FORMAT_NOT_FOUND"  # formato pedido indisponível
+ERROR_CODE_DOWNLOAD_FAILED = "DOWNLOAD_FAILED"    # todas as estratégias falharam
+ERROR_CODE_TIMEOUT = "TIMEOUT"                    # excedeu o teto de 4h
+ERROR_CODE_CANCELLED = "CANCELLED"                # cancelado pelo usuário
+ERROR_CODE_UNKNOWN = "UNKNOWN"                    # exceção genérica não-classificada
+
+def classify_error(msg: str) -> Optional[str]:
+    """Mapeia uma mensagem de erro livre para um ERROR_CODE_* estável.
+
+    Reaproveita as listas TRANSIENT/LOGIN/FORMAT já usadas no fluxo de retry, para não
+    divergir entre a decisão de retentar e a decisão de classificar. Retorna None se nada
+    casar (erro não-classificado).
+    """
+    if not msg:
+        return None
+    if is_match(msg, LOGIN_ERRORS):
+        return ERROR_CODE_AUTH_REQUIRED
+    if is_match(msg, TRANSIENT_ERRORS):
+        return ERROR_CODE_RATE_LIMITED
+    if is_match(msg, FORMAT_ERRORS):
+        return ERROR_CODE_FORMAT_NOT_FOUND
+    return None
+
 EQ_PRESETS = {
     'bass': 'equalizer=f=60:width_type=h:width=50:g=10',
     'soft': 'equalizer=f=1000:width_type=h:width=200:g=-5',
@@ -35,6 +63,7 @@ class JobState:
     title: Optional[str] = None
     filename: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None  # R2.4: código estável (ERROR_CODE_*); None = não classificado
     created_at: float = 0.0
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -53,20 +82,28 @@ main_event_loop = None
 active_tasks = {}
 
 async def memory_reaper():
-    """Background task to clear old completed jobs from memory to prevent leaks."""
+    """Background task to clear old finished jobs from memory to prevent leaks.
+
+    Remove da RAM jobs que já terminaram (estados finais) há mais de 12h. Usa finished_at
+    (set em worker_loop ao concluir/errar) em vez de last_update, que nunca era escrito.
+    Antes esta função checava 'completed' — mas o downloader usa 'done', então ela nunca
+    limpara jobs concluídos.
+    """
+    FINAL_STATES = {"done", "completed", "error", "cancelled", "rate_limited", "timeout"}
     while True:
         await asyncio.sleep(3600)  # run every 1 hour
         now = time.time()
         stale_jobs = []
         for j_id, st in jobs.items():
-            if st.status in ["completed", "error", "cancelled", "rate_limited"]:
-                if now - st.last_update > 43200: # 12 hours
+            # Só reapaga jobs finalizados com finished_at antigo (>= 12h).
+            if st.status in FINAL_STATES and st.finished_at is not None:
+                if now - st.finished_at > 43200:  # 12 hours
                     stale_jobs.append(j_id)
-        
+
         for j_id in stale_jobs:
             jobs.pop(j_id, None)
             active_tasks.pop(j_id, None)
-        
+
         if stale_jobs:
             print(f"[\033[90mMemory Reaper\033[0m] Cleared {len(stale_jobs)} old jobs from RAM.")
 
@@ -177,11 +214,21 @@ def build_ydl_opts(job_id: str, request) -> Dict[str, Any]:
 
     class StdoutLogger:
         def debug(self, msg): pass
-        def warning(self, msg): 
-            # Imprime o aviso com cor cinza escuro para não poluir
+        def warning(self, msg):
+            # Imprime o aviso com cor cinza escuro para não poluir; mascara paths absolutos.
+            try:
+                from utils import sanitize_paths
+                msg = sanitize_paths(msg)
+            except Exception:
+                pass
             print(f"      \033[90m[yt-dlp:warn] {msg}\033[0m")
-        def error(self, msg): 
-            # Imprime erro com cor vermelha
+        def error(self, msg):
+            # Imprime erro com cor vermelha; mascara paths absolutos.
+            try:
+                from utils import sanitize_paths
+                msg = sanitize_paths(msg)
+            except Exception:
+                pass
             print(f"      \033[31m[yt-dlp:err] {msg}\033[0m")
 
     def local_progress_hook(d):
@@ -376,6 +423,10 @@ def download_with_retries(job_id: str, request):
     st = jobs.get(job_id)
     if not st or st.status == "cancelled": return
 
+    # R2.4: guarda o código mais informativo visto durante os retries, para que a falha
+    # final (genérica) ainda carregue o motivo real (rate-limited/format/login/...).
+    last_code = None
+
     for idx, strat in enumerate(strategies, start=1):
         if st.status == "cancelled": return
         strat_name = strat['name'].upper()
@@ -384,7 +435,6 @@ def download_with_retries(job_id: str, request):
         if idx > 1:
             st.status = f"retry_method_{idx}"
         st.speed_str = f"Buscando Método {idx}/{len(strategies)}..."
-        
         try:
             ydl_opts = build_ydl_opts_for_strategy(job_id, request, strat)
             
@@ -578,12 +628,18 @@ def download_with_retries(job_id: str, request):
             if len(short_msg) > 100: short_msg = short_msg[:97] + "..."
             print(f"  \033[31mERR Falha no método {strat_name}: {short_msg}\033[0m")
 
+            # R2.4: classifica antes de decidir o fluxo; last_code persiste o motivo real.
+            classified = classify_error(msg)
+            if classified:
+                last_code = classified
+
             if is_match(msg, TRANSIENT_ERRORS):
                 st.status = "rate_limited" 
                 time.sleep(2) 
                 continue
             if is_match(msg, LOGIN_ERRORS):
                 st.status = "error"
+                st.error_code = ERROR_CODE_AUTH_REQUIRED
                 st.error = "Login necessário (YouTube bloqueou o vídeo). Atualize o cookies.txt."
                 mark_error_db(getattr(request, 'playlist_id', None), getattr(request, 'video_id', None), "Login Required", st.error)
                 print(f"  \033[1;31mERR Download abortado: Proteção de Login ativada.\033[0m\n")
@@ -594,6 +650,9 @@ def download_with_retries(job_id: str, request):
             continue
             
     st.status = "error"
+    # R2.4: prefere o motivo real classificado durante os retries; só cai em
+    # DOWNLOAD_FAILED se nada foi classificado (link inválido / bloqueio de IP genérico).
+    st.error_code = last_code or ERROR_CODE_DOWNLOAD_FAILED
     st.error = "Falha em todos os métodos de download (possível link inválido ou bloqueio de IP)."
     mark_error_db(getattr(request, 'playlist_id', None), getattr(request, 'video_id', None), "All strategies failed", st.error)
     print(f"  \033[1;31mERR Download permanentemente falhou para: {request.url}\033[0m\n")
@@ -627,6 +686,7 @@ async def worker_loop():
                     for t in pending: t.cancel()
                     if st:
                         st.status = "timeout"
+                        st.error_code = ERROR_CODE_TIMEOUT
                         st.error = "Download cancelado por tempo excedido (timeout 4 horas)"
                 else:
                     try:
@@ -642,6 +702,9 @@ async def worker_loop():
             except Exception as e:
                 if st:
                     st.status = "error"
+                    # R2.4: tenta classificar; se não casar, marca UNKNOWN para a UI saber
+                    # que foi erro genérico (e não exibir a dica cega de cookies do AUTH).
+                    st.error_code = classify_error(str(e)) or ERROR_CODE_UNKNOWN
                     st.error = str(e)
                     st.finished_at = time.time()
                     st.progress = 100.0

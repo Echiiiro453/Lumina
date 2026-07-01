@@ -1,19 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { probeCount } from "../utils/audioLagProbe";
 import { motion, AnimatePresence } from 'framer-motion';
 import { SlidersHorizontal, X, RefreshCw, Check } from 'lucide-react';
-import { t } from '../i18n';
+import { EQ_BANDS, EQ_PRESETS, SOUND_PRESETS } from './equalizerConstants';
 
-export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
-export const EQ_PRESETS = {
-  'Normal': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  'Bass Boost': [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
-  'Rock': [5, 4, 3, 1, -1, -1, 0, 2, 3, 4],
-  'Pop': [-2, -1, 0, 2, 4, 4, 2, 0, -1, -2],
-  'Vocal': [-2, -2, 0, 2, 4, 4, 3, 1, 0, -2],
-  'Electronic': [4, 3, 1, -2, -3, 0, 1, 3, 4, 5],
-  'Acoustic': [2, 2, 1, 0, 0, 0, 1, 1, 2, 2]
-};
+
+
+
 
 const SOUND_PRESETS_DATA = [
   { name: 'Som Limpo', desc: 'Quase transparente, só segurança/calibração.' },
@@ -27,111 +21,7 @@ const SOUND_PRESETS_DATA = [
   { name: 'Voz Clara', desc: 'Presenca vocal destacada.' }
 ];
 
-export const SOUND_PRESETS = {
-  'Som Limpo': {
-    label: "Som Limpo",
-    desc: "Quase transparente, só segurança/calibração.",
-    eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    crossfeed: { active: false, gainDb: -12, delayMs: 0.25, lpfHz: 700 },
-    deharsh: false,
-    spatial: { active: false, wet: 0.0, motion: "Parado", speed: 0.5, radius: 2.0 },
-    depth: 0.0,
-    room: { preset: "Estúdio", material: "Madeira", wet: 0.0 },
-    bass: { active: false, amount: 0.0 },
-    saturation: { active: false, mode: "tube", drive: 0.0, mix: 0.0 },
-    extraHeadroomDb: -0.5,
-    maxMakeupDb: 0.5
-  },
-  'Fone Relaxado': {
-    label: "Fone Relaxado",
-    desc: "Crossfeed alto, sem fadiga, som natural.",
-    crossfeed: { active: true, gainDb: -9, delayMs: 0.35, lpfHz: 750 },
-    eq: [0, 0, 0, 0, 0, 0, 0, -1.0, -1.5, -2.0],
-    deharsh: true,
-    spatial: { active: false, wet: 0.0 },
-    room: { preset: "Estúdio", material: "Tecido", wet: 0.0 },
-    saturation: { active: true, mode: "tube", drive: 0.08, mix: 0.12 },
-    extraHeadroomDb: -0.5,
-    maxMakeupDb: 0.8
-  },
-  'Cinema 8D': {
-    label: "Cinema 8D",
-    desc: "Som rotacional ao redor da cabeça.",
-    spatial: { active: true, wet: 0.30, motion: "Elipse", speed: 0.25, radius: 1.6 },
-    depth: 0.55,
-    room: { preset: "Cinema", material: "Tecido", wet: 0.10 },
-    bass: { active: true, amount: 0.12 },
-    eq: [4, 3, 1, -2, -3, 0, 1, 3, 4, 5],
-    extraHeadroomDb: -2.0,
-    maxMakeupDb: 1.0
-  },
-  'Concerto Ao Vivo': {
-    label: "Concerto Ao Vivo",
-    desc: "Palco de rock com acustica de hall.",
-    room: { preset: "Concerto", material: "Madeira", wet: 0.14 },
-    depth: 0.45,
-    spatial: { active: true, wet: 0.16, motion: "Parado" },
-    saturation: { active: true, mode: "tube", drive: 0.12, mix: 0.20 },
-    eq: [5, 4, 3, 1, -1, -1, 0, 2, 3, 4],
-    extraHeadroomDb: -1.8,
-    maxMakeupDb: 0.8
-  },
-  'Estudio Limpo': {
-    label: "Estúdio Limpo",
-    desc: "Seco e preciso, sem coloracao.",
-    room: { preset: "Estúdio", material: "Tecido", wet: 0.04 },
-    spatial: { active: false, wet: 0.0 },
-    saturation: { active: false, drive: 0.0, mix: 0.0 },
-    bass: { active: false, amount: 0.0 },
-    eq: [2, 2, 1, 0, 0, 0, 1, 1, 2, 2],
-    deharsh: true,
-    extraHeadroomDb: -0.5,
-    maxMakeupDb: 0.5
-  },
-  'Catedral': {
-    label: "Catedral",
-    desc: "Reverb longo e grandioso.",
-    room: { preset: "Catedral", material: "Pedra", wet: 0.11, hpf: 220, lpf: 7000 },
-    depth: 0.70,
-    spatial: { active: true, wet: 0.18 },
-    eq: [-2, -1, 0, 2, 4, 4, 2, 0, -1, -2],
-    extraHeadroomDb: -2.5,
-    maxMakeupDb: 0.8
-  },
-  'Lo-Fi': {
-    label: "Lo-Fi",
-    desc: "Morno e vintage, agudos cortados.",
-    saturation: { active: true, mode: "tape", drive: 0.28, mix: 0.35 },
-    eq: [1.0, 0, 0, 0, 0, 0, 0, -3.0, -5.0, -6.0],
-    room: { preset: "Pequena", material: "Madeira", wet: 0.04 },
-    stereoWidth: 0.80,
-    extraHeadroomDb: -1.5,
-    maxMakeupDb: 0.8
-  },
-  'Bass Boost': {
-    label: "Bass Boost",
-    desc: "Sub-graves dominantes.",
-    bass: { active: true, amount: 0.35 },
-    eq: [2.5, 2.0, 1.0, 0, 0, 0, 0, 0, 0, 0],
-    subMono: true,
-    lowSideGain: 0.0,
-    saturation: { active: true, mode: "transformer", drive: 0.12, mix: 0.18 },
-    extraHeadroomDb: -2.5,
-    maxMakeupDb: 0.5
-  },
-  'Voz Clara': {
-    label: "Voz Clara",
-    desc: "Presenca vocal destacada.",
-    eq: [0, 0, 0, 0, 0, +1.0, +1.2, +0.6, 0, 0],
-    deesser: true,
-    deharsh: true,
-    room: { preset: "Estúdio", wet: 0.03 },
-    spatial: { active: false, wet: 0.0 },
-    saturation: { active: true, mode: "tube", drive: 0.10, mix: 0.15 },
-    extraHeadroomDb: -1.0,
-    maxMakeupDb: 0.8
-  }
-};
+
 
 const AMBIENTES_PADRAO = ['Pequena', 'Club', 'Concerto', 'Catedral', 'Estádio', 'Vastidão'];
 const AMBIENTES_IR = ['Geleira', 'Praia', 'Tubo', 'Squash', 'Túnel', 'Concreto', 'Tanque', 'Masmorra'];
@@ -172,7 +62,7 @@ function computeAutoEqCurveMaxBoostDb(filters) {
       if (db > maxBoostDb) maxBoostDb = db;
     }
     return Math.max(0, maxBoostDb);
-  } catch (e) {
+  } catch {
     return Math.max(0, ...filters.map(f => f.gainDb));
   }
 }
@@ -271,10 +161,10 @@ function M3Chip({ label, selected, onClick, disabled, icon: Icon, checkIcon = tr
 export function EqualizerModal({ 
   isOpen, onClose, gains, setGains, preset, setPreset, 
   playbackRate, setPlaybackRate, preservesPitch, setPreservesPitch, reverbMix, setReverbMix,
-  enableTransient, setEnableTransient, transientAttack, setTransientAttack, transientSustain, setTransientSustain,
+  enableTransient, setEnableTransient,
   enableAdaptiveEq, setEnableAdaptiveEq, enableDeesser, setEnableDeesser, enableDeharsh, setEnableDeharsh,
-  enableSaturation, setEnableSaturation, satDrive, setSatDrive, satMode, setSatMode,
-  enableSubmono, setEnableSubmono, enableCrossfeed, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
+  enableSaturation, setEnableSaturation, setSatDrive, setSatMode,
+  enableSubmono, setEnableSubmono, setEnableCrossfeed, crossfeedAmount, setCrossfeedAmount,
   
   enable8D, setEnable8D,
   motionMode, setMotionMode,
@@ -290,14 +180,13 @@ export function EqualizerModal({
   genreProfile, setGenreProfile,
   harmonicExciter, setHarmonicExciter,
   enablePhaseRotation, setEnablePhaseRotation,
-  enableSpectralGlue, setEnableSpectralGlue,
-  spectralGlueThreshold, setSpectralGlueThreshold,
   enableStereoDepth, setEnableStereoDepth,
   stereoDepthAmount, setStereoDepthAmount,
   enableReplayGain, setEnableReplayGain,
   
   autoEqProfile, setAutoEqProfile,
   autoEqAmount, setAutoEqAmount,
+  autoEqWavInfo,
   
   abMode, setAbMode,
   abBlend, setAbBlend,
@@ -305,7 +194,96 @@ export function EqualizerModal({
   presetIntensity, setPresetIntensity,
   setPresetHeadroomConfig, onPresetApplied
 }) {
+  probeCount("renders", "EqualizerModal");
   const [activeTab, setActiveTab] = useState('eq');
+
+  // AutoEQ Cloud Browser State
+  const [cloudHeadphones, setCloudHeadphones] = useState([]);
+  const [cloudSearch, setCloudSearch] = useState('');
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [cloudError, setCloudError] = useState(null);
+
+  // Fetch AutoEQ Index
+  useEffect(() => {
+    if (isOpen && cloudHeadphones.length === 0 && !isCloudLoading) {
+      setIsCloudLoading(true);
+      setCloudError(null);
+      fetch('https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/INDEX.md')
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch AutoEQ index');
+          return res.text();
+        })
+        .then(text => {
+          const lines = text.split('\n');
+          const headphones = [];
+          for (const line of lines) {
+            // Match: - [Name](./path/to/folder) by Source on Target
+            const match = line.match(/^- \[(.+?)\]\(\.\/(.+?)\) by/);
+            if (match) {
+              headphones.push({
+                name: match[1],
+                path: match[2],
+                encodedName: match[2].split('/').pop()
+              });
+            }
+          }
+          setCloudHeadphones(headphones);
+          setIsCloudLoading(false);
+        })
+        .catch(err => {
+          console.error('Error fetching AutoEQ index:', err);
+          setCloudError(err.message);
+          setIsCloudLoading(false);
+        });
+    }
+  }, [isOpen, cloudHeadphones.length, isCloudLoading]);
+
+  const downloadCloudProfile = async (headphone) => {
+    try {
+      setIsDownloading(true);
+      // Format uses the already encoded path parts directly from INDEX.md
+      const wavUrl = `https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/${headphone.path}/${headphone.encodedName}%20minimum%20phase%2044100Hz.wav`;
+      const txtUrl = `https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/${headphone.path}/${headphone.encodedName}%20ParametricEQ.txt`;
+
+      // Try WAV first
+      const wavRes = await fetch(wavUrl);
+      if (wavRes.ok) {
+        const buf = await wavRes.arrayBuffer();
+        if (setAutoEqProfile) {
+          setAutoEqProfile({
+            id: headphone.name,
+            name: headphone.name,
+            source: 'AutoEQ WAV',
+            _arrayBuffer: buf,
+            preampDb: -0.7,
+            filters: [],
+            maxBoostDb: 0,
+            safety: 'OK',
+          });
+        }
+        setIsDownloading(false);
+        return;
+      }
+      
+      // Fallback to TXT
+      const txtRes = await fetch(txtUrl);
+      if (txtRes.ok) {
+        const text = await txtRes.text();
+        if (setAutoEqProfile) {
+          setAutoEqProfile(parseAutoEqTxt(text, { name: headphone.name, id: headphone.name }));
+        }
+        setIsDownloading(false);
+        return;
+      }
+      
+      throw new Error('No profile found (WAV or TXT)');
+    } catch (e) {
+      console.error('Download error:', e);
+      alert('Falha ao baixar perfil: ' + e.message);
+      setIsDownloading(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -319,14 +297,36 @@ export function EqualizerModal({
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
-      if (setAutoEqProfile) {
-        setAutoEqProfile(parseAutoEqTxt(text, { name: file.name.replace('.txt', ''), id: file.name }));
-      }
-    };
-    reader.readAsText(file);
+
+    const isWav = file.name.toLowerCase().endsWith('.wav');
+
+    if (isWav) {
+      // Lê como ArrayBuffer para o ConvolverNode
+      file.arrayBuffer().then((buf) => {
+        if (setAutoEqProfile) {
+          setAutoEqProfile({
+            id: file.name,
+            name: file.name,
+            source: 'AutoEQ WAV',
+            _arrayBuffer: buf,
+            preampDb: -0.7, // preamp conservador padrão para WAV
+            filters: [],    // WAV não usa filtros Biquad
+            maxBoostDb: 0,
+            safety: 'OK',
+          });
+        }
+      });
+    } else {
+      // Lê como texto (.txt)
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target.result;
+        if (setAutoEqProfile) {
+          setAutoEqProfile(parseAutoEqTxt(text, { name: file.name.replace('.txt', ''), id: file.name }));
+        }
+      };
+      reader.readAsText(file);
+    }
   };
 
   const applyPreset = (presetName, intensity = presetIntensity) => {
@@ -569,11 +569,61 @@ export function EqualizerModal({
                   </div>
 
                   {!autoEqProfile ? (
-                    <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
-                      <p className="text-xs text-[var(--md-sys-color-on-surface-variant)] mb-4 text-center">Importe um preset do AutoEQ (.txt)<br/>para corrigir seu fone de ouvido.</p>
-                      <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] rounded-full text-xs font-bold hover:shadow-lg transition-all">
-                        Carregar Preset
-                        <input type="file" accept=".txt" onChange={handleFileUpload} className="hidden" />
+                    <div className="flex flex-col items-center justify-center p-6 border-2 border-[var(--md-sys-color-outline-variant)]/30 rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]/50">
+                      
+                      <div className="w-full mb-6">
+                        <div className="relative mb-4">
+                          <input 
+                            type="text" 
+                            placeholder="Buscar no AutoEQ (ex: Moondrop Aria)..."
+                            value={cloudSearch}
+                            onChange={(e) => setCloudSearch(e.target.value)}
+                            className="w-full bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] text-sm px-4 py-3 rounded-full border border-[var(--md-sys-color-outline-variant)] focus:outline-none focus:border-[var(--md-sys-color-primary)] placeholder-[var(--md-sys-color-on-surface-variant)]/50 transition-colors"
+                          />
+                          {isCloudLoading && (
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--md-sys-color-primary)] border-t-transparent rounded-full animate-spin"></div>
+                          )}
+                        </div>
+
+                        {cloudError && (
+                          <div className="text-xs text-[var(--md-sys-color-error)] text-center mb-4 p-2 bg-[var(--md-sys-color-error)]/10 rounded-lg">
+                            Erro ao carregar catálogo: {cloudError}
+                          </div>
+                        )}
+
+                        <div className="max-h-[200px] overflow-y-auto custom-scrollbar rounded-lg border border-[var(--md-sys-color-outline-variant)]/20 bg-[var(--md-sys-color-surface-container-low)]">
+                          {cloudHeadphones.length > 0 && cloudSearch.length > 1 ? (
+                            cloudHeadphones
+                              .filter(h => h.name.toLowerCase().includes(cloudSearch.toLowerCase()))
+                              .slice(0, 50)
+                              .map((h, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => downloadCloudProfile(h)}
+                                  disabled={isDownloading}
+                                  className="w-full text-left px-4 py-3 hover:bg-[var(--md-sys-color-primary)]/10 text-sm border-b border-[var(--md-sys-color-outline-variant)]/10 last:border-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed group flex justify-between items-center"
+                                >
+                                  <span className="text-[var(--md-sys-color-on-surface)] font-medium group-hover:text-[var(--md-sys-color-primary)] transition-colors">{h.name}</span>
+                                  <span className="text-[10px] text-[var(--md-sys-color-on-surface-variant)] uppercase tracking-wider bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 rounded">Download</span>
+                                </button>
+                              ))
+                          ) : (
+                            <div className="p-8 text-center text-xs text-[var(--md-sys-color-on-surface-variant)]/70">
+                              {cloudHeadphones.length > 0 ? "Digite para buscar milhares de fones de ouvido..." : "Carregando catálogo..."}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center w-full gap-4 mb-4">
+                        <div className="flex-1 h-px bg-[var(--md-sys-color-outline-variant)]/30"></div>
+                        <span className="text-[10px] uppercase font-bold text-[var(--md-sys-color-on-surface-variant)]">OU</span>
+                        <div className="flex-1 h-px bg-[var(--md-sys-color-outline-variant)]/30"></div>
+                      </div>
+
+                      <label className="cursor-pointer px-6 py-2 bg-[var(--md-sys-color-surface-container-high)] text-[var(--md-sys-color-on-surface)] border border-[var(--md-sys-color-outline-variant)] rounded-full text-xs font-bold hover:bg-[var(--md-sys-color-surface-container-highest)] transition-all">
+                        Carregar Arquivo Local (.txt ou .wav)
+                        <input type="file" accept=".txt,.wav" onChange={handleFileUpload} className="hidden" />
                       </label>
                     </div>
                   ) : (
@@ -584,11 +634,27 @@ export function EqualizerModal({
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${autoEqProfile.safety === 'OK' ? 'bg-[#4ade80]/20 text-[#4ade80]' : 'bg-[#facc15]/20 text-[#facc15]'}`}>{autoEqProfile.safety}</span>
                         </div>
                         <div className="text-sm font-bold text-[var(--md-sys-color-on-surface)]">{autoEqProfile.name}</div>
-                        <div className="flex space-x-4 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
-                          <div>Filtros: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.filters.length}</span></div>
-                          <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb.toFixed(1)}dB</span></div>
-                          <div>Boost Max: <span className="text-[var(--md-sys-color-primary)] font-bold">+{autoEqProfile.maxBoostDb.toFixed(1)}dB</span></div>
-                        </div>
+
+                        {autoEqProfile.source === 'AutoEQ WAV' ? (
+                          /* Card WAV / IR */
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                            <div>Tipo: <span className="text-[var(--md-sys-color-primary)] font-bold">WAV / Impulse Response</span></div>
+                            <div>IR: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo?.loaded ? 'Carregado' : 'Aguardando...'}</span></div>
+                            <div>Convolver: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo?.convolverConnected ? 'Ativo' : 'Inativo'}</span></div>
+                            {autoEqWavInfo?.sampleRate && <div>Sample Rate: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.sampleRate} Hz</span></div>}
+                            {autoEqWavInfo?.durationMs && <div>Duração: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.durationMs} ms</span></div>}
+                            {autoEqWavInfo?.channels && <div>Canais: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqWavInfo.channels}</span></div>}
+                            <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb?.toFixed(1)}dB</span></div>
+                          </div>
+                        ) : (
+                          /* Card TXT / Biquad */
+                          <div className="flex space-x-4 mt-3 text-[10px] font-mono text-[var(--md-sys-color-on-surface-variant)]">
+                            <div>Tipo: <span className="text-[var(--md-sys-color-primary)] font-bold">Parametric EQ</span></div>
+                            <div>Filtros: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.filters.length}</span></div>
+                            <div>Preamp: <span className="text-[var(--md-sys-color-primary)] font-bold">{autoEqProfile.preampDb.toFixed(1)}dB</span></div>
+                            <div>Boost Max: <span className="text-[var(--md-sys-color-primary)] font-bold">+{autoEqProfile.maxBoostDb.toFixed(1)}dB</span></div>
+                          </div>
+                        )}
                       </div>
 
                       <div>

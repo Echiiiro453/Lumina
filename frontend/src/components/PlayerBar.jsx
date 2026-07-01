@@ -3,22 +3,26 @@ import { t } from '../i18n';
 import { Music, Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, X, Maximize2, Minimize2, ExternalLink, Repeat, Shuffle, Info, Activity, Layers, SlidersHorizontal, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RippleButton } from './Ripple';
-import { EqualizerModal, EQ_PRESETS, EQ_BANDS } from './EqualizerModal';
+import { EqualizerModal } from './EqualizerModal';
+import { EQ_PRESETS, EQ_BANDS } from './equalizerConstants';
 import { AudioDiagnosticsPanel } from './AudioDiagnosticsPanel';
 import { getAutoCalibrationProfile, SEEK_TEMP_HEADROOM_DB } from '../audio/presets/autoCalibrationProfiles';
+import { logToCMD } from './playerConstants';
+import {
+  createAutoEqIrStage,
+  loadAutoEqWav,
+  disableAutoEqWav,
+  getAutoEqIrInfo,
+  setAutoEqIrIntensity,
+} from '../audio/autoEqIrStage';
+import { probeCount } from '../utils/audioLagProbe';
+
 
 // --- AUXILIAR DE TELEMETRIA (Logs diretos no CMD) ---
-export const logToCMD = (source, message, level = "info") => {
-  fetch("http://localhost:8000/api/telemetry", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source, message, level })
-  }).catch(() => {});
-};
+// Throttled per-source to avoid flooding the backend/browser with HTTP requests.
+
+
 // ---------------------------------------------------
-
-const widthGains = { 'Estreito': 0.5, 'Natural': 1.0, 'Largo': 1.5, 'Ultra': 2.2 };
-
 
 const createReverbIR = (audioCtx, duration, decay) => {
   const sampleRate = audioCtx.sampleRate;
@@ -72,7 +76,7 @@ const loadIR = async (audioCtx, preset) => {
     if (!response.ok) throw new Error("IR file not found");
     const arrayBuffer = await response.arrayBuffer();
     buffer = await audioCtx.decodeAudioData(arrayBuffer);
-  } catch (e) {
+  } catch {
     let duration = 3.5, decay = 2.5;
     switch (preset) {
       case 'Pequena': duration = 0.8; decay = 5.0; break;
@@ -96,20 +100,6 @@ const loadIR = async (audioCtx, preset) => {
   return buffer;
 };
 
-
-const makeExciterCurve = (amount) => {
-  const n = 256;
-  const curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / (n - 1) - 1;
-    if (amount === 0) {
-      curve[i] = x;
-    } else {
-      curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
-    }
-  }
-  return curve;
-};
 
 function analyzeTrackLoudness(audioBuffer) {
   const EPS = 1e-12;
@@ -152,111 +142,13 @@ function calculateReplayGain({
   };
 }
 
-function computeAutoEqCurveMaxBoostDb(filters) {
-  try {
-    const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
-    const fftSize = 512;
-    const freqs = new Float32Array(fftSize);
-    for (let i = 0; i < fftSize; i++) {
-      const t = i / (fftSize - 1);
-      freqs[i] = 20 * Math.pow(1000, t);
-    }
 
-    const totalMag = new Float32Array(fftSize).fill(1);
-    for (const f of filters) {
-      const bq = ctx.createBiquadFilter();
-      bq.type = f.type;
-      bq.frequency.value = f.freq;
-      if (f.gainDb !== undefined) bq.gain.value = f.gainDb;
-      if (f.Q !== undefined) bq.Q.value = f.Q;
-      
-      const mag = new Float32Array(fftSize);
-      const phase = new Float32Array(fftSize);
-      bq.getFrequencyResponse(freqs, mag, phase);
-      
-      for (let i = 0; i < fftSize; i++) {
-        totalMag[i] *= Math.max(mag[i], 1e-9);
-      }
-    }
 
-    let maxBoostDb = -999;
-    for (let i = 0; i < fftSize; i++) {
-      const db = 20 * Math.log10(Math.max(totalMag[i], 1e-9));
-      if (db > maxBoostDb) maxBoostDb = db;
-    }
-    return Math.max(0, maxBoostDb);
-  } catch (e) {
-    return Math.max(0, ...filters.map(f => f.gainDb));
-  }
-}
 
-function sanitizeHeadphoneProfile(profile) {
-  const allowed = ["peaking", "lowshelf", "highshelf", "lowpass", "highpass"];
-  const filters = (profile.filters || [])
-    .filter(f => Number.isFinite(f.freq))
-    .map(f => ({
-      type: allowed.includes(f.type) ? f.type : "peaking",
-      freq: Math.max(20, Math.min(20000, f.freq)),
-      gainDb: Math.max(-12, Math.min(6, f.gainDb ?? 0)),
-      Q: Math.max(0.1, Math.min(8, f.Q ?? 1))
-    }))
-    .slice(0, 12);
-    
-  const maxBoostDb = computeAutoEqCurveMaxBoostDb(filters);
-  const safePreampDb = Math.min(profile.preampDb ?? 0, -(maxBoostDb + 0.7));
-  
-  return {
-    ...profile,
-    filters,
-    maxBoostDb,
-    preampDb: safePreampDb,
-    safety: profile.preampDb <= safePreampDb ? "OK" : "ADJUSTED"
-  };
-}
-
-export function parseAutoEqTxt(text, meta = {}) {
-  const lines = text.split(/\r?\n/);
-  let preampDb = 0;
-  const filters = [];
-  for (const line of lines) {
-    const preampMatch = line.match(/Preamp:\s*([-+]?\d+(\.\d+)?)\s*dB/i);
-    if (preampMatch) {
-      preampDb = parseFloat(preampMatch[1]);
-      continue;
-    }
-    const filterMatch = line.match(
-      /Filter\s+\d+:\s+ON\s+(\w+)\s+Fc\s+([-+]?\d+(\.\d+)?)\s+Hz\s+Gain\s+([-+]?\d+(\.\d+)?)\s+dB\s+Q\s+([-+]?\d+(\.\d+)?)/i
-    );
-    if (filterMatch) {
-      const autoEqType = filterMatch[1].toUpperCase();
-      const typeMap = {
-        PK: "peaking",
-        LS: "lowshelf",
-        HS: "highshelf",
-        LP: "lowpass",
-        HP: "highpass"
-      };
-      filters.push({
-        type: typeMap[autoEqType] ?? "peaking",
-        freq: Number(filterMatch[2]),
-        gainDb: Number(filterMatch[4]),
-        Q: Number(filterMatch[6])
-      });
-    }
-  }
-  return sanitizeHeadphoneProfile({
-    id: meta.id ?? "custom-profile",
-    name: meta.name ?? "Custom AutoEQ Profile",
-    brand: meta.brand ?? "Unknown",
-    type: meta.type ?? "Unknown",
-    source: "AutoEQ TXT",
-    target: meta.target ?? "Unknown",
-    preampDb,
-    filters
-  });
-}
+const DISABLE_WORKLET_TELEMETRY = typeof window !== 'undefined' && localStorage.getItem('lumina.disableWorkletTelemetry') === '1';
 
 export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isShuffle, setIsShuffle, onOpenArtist }) {
+  probeCount('renders', 'PlayerBar');
 
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -314,7 +206,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const masteringRef = useRef(null);
   const lufsRef = useRef(null);
-  const [lufsValue, setLufsValue] = useState(null);
+  const lufsValueRef = useRef(null); // LUFS reportado pelo worklet; UI lê por polling, sem setState
+  const lastMiniplayerPostRef = useRef(0); // throttle do POST de progresso do miniplayer
 
   // --- Missing / New DSP States & Refs ---
   const [enableReplayGain, setEnableReplayGain] = useState(true);
@@ -331,6 +224,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const [autoEqAmount, setAutoEqAmount] = useState(0.75);
   const autoEqPreampRef = useRef(null);
   const autoEqFiltersRef = useRef([]);
+
+  // --- AutoEQ WAV / IR Stage ---
+  const autoEqIrStageRef = useRef(null);
+  const [autoEqWavInfo, setAutoEqWavInfo] = useState(null);
 
   // --- AB Comparator ---
   const [abMode, setAbMode] = useState('PROCESSED');
@@ -390,7 +287,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const limiterRef = useRef(null);
   const occlusionFilterRef = useRef(null);
   const exciterNodeRef = useRef(null);
-  const crossfadeTimeoutRef = useRef(null);
   const masterTelemetryRef = useRef(null);
   const lastResumeStatusRef = useRef("PENDING");
   const lastPerformanceGovernorLogTimeRef = useRef(0);
@@ -399,6 +295,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const governorActiveRef = useRef(false);
   const criticalStreakStartMsRef = useRef(0);
   const lowStreakStartMsRef = useRef(0);
+  const lastGovernorChangeMsRef = useRef(0);
   const governorRiskRef = useRef("BAIXO");
   const enableTransientRef = useRef(false);
   const enableAdaptiveEqRef = useRef(false);
@@ -442,13 +339,15 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         onPrev();
       }
     };
+    probeCount('listenersAdded', 'voiceCommand');
     window.addEventListener('voiceCommand', handleVoice);
-    return () => window.removeEventListener('voiceCommand', handleVoice);
+    return () => { probeCount('listenersRemoved', 'voiceCommand'); window.removeEventListener('voiceCommand', handleVoice); };
   }, [isPlaying, onNext, onPrev]);
 
   // Sleep Timer Countdown
   useEffect(() => {
     if (sleepTimer === null) return;
+    probeCount('intervalsCreated', 'PlayerBar');
     const interval = setInterval(() => {
       setSleepTimeLeft(prev => {
         if (prev <= 1) {
@@ -459,7 +358,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(interval);
+    return () => { probeCount('intervalsCleared', 'PlayerBar'); clearInterval(interval); };
   }, [sleepTimer]);
 
   const handleSetSleepTimer = (minutes) => {
@@ -474,13 +373,21 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   };
 
   // Sync state to backend for MiniPlayer
+  // O effect depende de `progress`, que muda ~4x/s (timeupdate). Sem throttle, isso
+  // inundaria o backend de POSTs. Assim: mudanças estruturais (faixa/play/duração/cover)
+  // são enviadas imediatamente; mudanças de `progress` são throttled para no máx 1/s.
   useEffect(() => {
     if (!currentSong) return;
-    
+
     let cover = '';
     if (metadata?.coverUrl) cover = metadata.coverUrl;
     else if (currentSong.video_id) cover = `https://i.ytimg.com/vi/${currentSong.video_id}/0.jpg`;
     else if (currentSong.thumbnails && currentSong.thumbnails.length > 0) cover = currentSong.thumbnails[0].url;
+
+    const now = Date.now();
+    const elapsed = now - lastMiniplayerPostRef.current;
+    if (elapsed < 1000) return; // throttle: ignora POSTs muito seguidos (progress contínuo)
+    lastMiniplayerPostRef.current = now;
 
     fetch('http://localhost:8000/api/miniplayer/state', {
       method: 'POST',
@@ -494,17 +401,22 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         duration
       })
     }).catch(() => {});
-    
-    // Log de telemetria
-    if (isPlaying) {
-      logToCMD("PLAYER", `Tocando faixa: ${currentSong?.title || 'Desconhecida'}`, "info");
-    } else {
-      logToCMD("PLAYER", "Música pausada.", "warn");
-    }
+
   }, [currentSong, isPlaying, progress, duration, metadata]);
+
+  // Log de telemetria do player (apenas quando faixa ou estado de play muda, nao a cada tick de progresso)
+  useEffect(() => {
+    if (!currentSong) return;
+    if (isPlaying) {
+      logToCMD("PLAYER", `Tocando faixa: ${currentSong?.title || 'Desconhecida'}`, "info", 0);
+    } else {
+      logToCMD("PLAYER", "Música pausada.", "warn", 0);
+    }
+  }, [currentSong?.title, currentSong?.file, isPlaying]);
 
   // Poll commands from MiniPlayer
   useEffect(() => {
+    probeCount('intervalsCreated', 'PlayerBar');
     const interval = setInterval(() => {
       fetch('http://localhost:8000/api/miniplayer/command')
         .then(res => res.json())
@@ -516,7 +428,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         })
         .catch(() => {});
     }, 500);
-    return () => clearInterval(interval);
+    return () => { probeCount('intervalsCleared', 'PlayerBar'); clearInterval(interval); };
   }, [onNext, onPrev]);
 
   const openMiniPlayer = () => {
@@ -604,7 +516,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   const scrobbledRef = useRef(false);
   
   const [artistPhoto, setArtistPhoto] = useState(null);
-  const [showVisualizer, setShowVisualizer] = useState(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const canvasRef = useRef(null);
@@ -616,18 +527,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     try {
       const saved = localStorage.getItem('appmusica_eq_bands');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch { /* Ignore malformed saved EQ data and use the default preset. */ }
     return EQ_PRESETS['Normal'] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   });
   const eqFiltersRef = useRef([]);
-  const handleGainChange = (bandIndex, value) => {
-    setEqGains(prev => {
-      const newGains = [...prev];
-      newGains[bandIndex] = value;
-      return newGains;
-    });
-    setEqPreset('Personalizado');
-  };
 
   useEffect(() => {
     localStorage.setItem('appmusica_eq_preset', eqPreset);
@@ -722,12 +625,62 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     Carpete: { hfDampingDb: -6.0, midDampingDb: -2.0, wetWidth: 0.60, wetMixMult: 0.60, hpfOffset: 80, lpfOffset: -5000 }
   };
 
+  // --- AutoEQ WAV (ConvolverNode) ---
+  useEffect(() => {
+    const ctx = audioContextRef.current;
+    const stage = autoEqIrStageRef.current;
+    if (!ctx || !stage) return;
+
+    const isWav = autoEqProfile && autoEqProfile.source === 'AutoEQ WAV';
+
+    if (!isWav) {
+      // Se removido ou perfil TXT, desativa o IR
+      if (stage.irInfo?.loaded) {
+        disableAutoEqWav(stage, ctx);
+        setAutoEqWavInfo(null);
+      }
+      return;
+    }
+
+    // Perfil WAV: carregar e conectar
+    const { _arrayBuffer, preampDb, name: fileName } = autoEqProfile;
+    if (!_arrayBuffer) return;
+
+    const intensityKey = autoEqAmount >= 1.0 ? 'completa' : autoEqAmount >= 0.65 ? 'natural' : 'leve';
+
+    loadAutoEqWav(stage, ctx, _arrayBuffer, {
+      preampDb: preampDb ?? 0,
+      intensity: intensityKey,
+      fileName,
+    })
+      .then(() => {
+        setAutoEqWavInfo(getAutoEqIrInfo(stage));
+      })
+      .catch((err) => {
+        console.error('[AutoEQ-IR] Erro ao carregar WAV:', err);
+        setAutoEqWavInfo(null);
+      });
+  }, [autoEqProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- AutoEQ WAV: reage a mudança de intensidade (sem recarregar o buffer) ---
+  useEffect(() => {
+    const ctx = audioContextRef.current;
+    const stage = autoEqIrStageRef.current;
+    if (!ctx || !stage || !stage.irInfo?.loaded) return;
+    const intensityKey = autoEqAmount >= 1.0 ? 'completa' : autoEqAmount >= 0.65 ? 'natural' : 'leve';
+    setAutoEqIrIntensity(stage, ctx, intensityKey);
+    setAutoEqWavInfo(getAutoEqIrInfo(stage));
+  }, [autoEqAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- AutoEQ TXT (Biquad Filters) ---
   useEffect(() => {
     if (!autoEqPreampRef.current || !autoEqFiltersRef.current || !audioContextRef.current) return;
     
     const ctx = audioContextRef.current;
-    if (!autoEqProfile) {
-      // Bypass
+    const isWav = autoEqProfile && autoEqProfile.source === 'AutoEQ WAV';
+
+    // Para WAV, a chain biquad fica flat (bypass)
+    if (!autoEqProfile || isWav) {
       autoEqPreampRef.current.gain.setTargetAtTime(1.0, ctx.currentTime, 0.1);
       autoEqFiltersRef.current.forEach(f => {
         f.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
@@ -1073,7 +1026,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const corrVal = stereoTelemetryRef.current ? stereoTelemetryRef.current.corr : 1.0;
       const widthPercent = { 'Estreito': '50%', 'Natural': '100%', 'Largo': '140%', 'Ultra': '180%' }[stereoWidth] || '100%';
       
-      const lowCorr = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.lowCorr : 1.0;
       const bassMonoSafe = multibandStereoTelemetryRef.current ? multibandStereoTelemetryRef.current.bassMonoSafe : true;
 
       const limiterGR = masterTelemetryRef.current ? masterTelemetryRef.current.limiterReductionDb : "0.0";
@@ -1156,12 +1108,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          }
       }
       
+      probeCount('rafCreated', 'updatePan');
       animationFrameId = requestAnimationFrame(updatePan);
     };
 
     updatePan();
 
     return () => {
+      probeCount('rafCanceled', 'updatePan');
       cancelAnimationFrame(animationFrameId);
     };
   }, [enable8D, motionMode, motionSpeed, motionRadius, isPlaying]);
@@ -1235,7 +1189,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       try {
         await audioCtx.audioWorklet.addModule('/source-quality-processor.js?v=' + Date.now());
         sourceQualityNode = new AudioWorkletNode(audioCtx, 'source-quality');
-        sourceQualityNode.port.onmessage = (e) => {
+        sourceQualityNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      sourceQualityNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'sourceQualityNode');
+        probeCount('portMessages', 'sourceQualityNode');
           if (e.data.type === 'telemetry') {
             sourceQualityTelemetryRef.current = e.data;
           }
@@ -1260,7 +1217,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       ditherSrc.start();
       ditherSrc.connect(source);
       
-      // --- AutoEQ Chain ---
+      // --- AutoEQ WAV / IR Stage (ConvolverNode) ---
+      // Fica entre o replayGainNode e os filtros Biquad do AutoEQ TXT.
+      // Quando nenhum WAV está carregado, funciona como bypass puro.
+      const irStage = createAutoEqIrStage(audioCtx);
+      autoEqIrStageRef.current = irStage;
+      replayGainNode.connect(irStage.input);
+
+      // --- AutoEQ TXT Chain (Biquad) ---
       const autoEqPreamp = audioCtx.createGain();
       autoEqPreampRef.current = autoEqPreamp;
       const autoEqFilters = [];
@@ -1273,8 +1237,9 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
          autoEqFilters.push(f);
       }
       autoEqFiltersRef.current = autoEqFilters;
-      
-      replayGainNode.connect(autoEqPreamp);
+
+      // IR Stage output → preamp TXT → filtros Biquad
+      irStage.output.connect(autoEqPreamp);
       autoEqPreamp.connect(autoEqFilters[0]);
       for(let i=0; i<11; i++) {
          autoEqFilters[i].connect(autoEqFilters[i+1]);
@@ -1381,7 +1346,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deesser-processor.js');
       const deesserNode = new AudioWorkletNode(audioCtx, 'deesser');
       deesserNode.port.postMessage({ active: enableDeesser });
-      deesserNode.port.onmessage = (e) => {
+      deesserNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      deesserNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'deesserNode');
+        probeCount('portMessages', 'deesserNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deesserRef.current = deesserNode;
@@ -1391,7 +1359,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/deharsh-processor.js');
       const deharshNode = new AudioWorkletNode(audioCtx, 'deharsh');
       deharshNode.port.postMessage({ active: enableDeharsh });
-      deharshNode.port.onmessage = (e) => {
+      deharshNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      deharshNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'deharshNode');
+        probeCount('portMessages', 'deharshNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       deharshRef.current = deharshNode;
@@ -1405,7 +1376,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       currentNode.connect(saturationNode);
       currentNode = saturationNode;
 
-      saturationNode.port.onmessage = (e) => {
+      saturationNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      saturationNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'saturationNode');
+        probeCount('portMessages', 'saturationNode');
         // if (e.data.type === 'telemetry') {
         //   logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         // }
@@ -1414,7 +1388,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       await loadModule('/submono-processor.js');
       const submonoNode = new AudioWorkletNode(audioCtx, 'submono');
       submonoNode.port.postMessage({ active: enableSubmono });
-      submonoNode.port.onmessage = (e) => {
+      submonoNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      submonoNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'submonoNode');
+        probeCount('portMessages', 'submonoNode');
         // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
       };
       submonoRef.current = submonoNode;
@@ -1440,7 +1417,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       const widthMap = { Estreito: 0.5, Natural: 1.0, Largo: 1.4, Ultra: 1.8 };
       const wVal = widthMap[stereoWidth] !== undefined ? widthMap[stereoWidth] : 1.0;
       mbWidthNode.port.postMessage({ width: wVal });
+      mbWidthNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
       mbWidthNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'mbWidthNode');
+        probeCount('portMessages', 'mbWidthNode');
         if (e.data && e.data.type === 'telemetry') {
           multibandStereoTelemetryRef.current = e.data;
         }
@@ -1462,7 +1442,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/depth-processor.js');
         const depthNode = new AudioWorkletNode(audioCtx, 'depth');
         depthNode.port.postMessage({ active: enableStereoDepth, depth: stereoDepthAmount });
-        depthNode.port.onmessage = (e) => {
+        depthNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      depthNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'depthNode');
+        probeCount('portMessages', 'depthNode');
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         depthRef.current = depthNode;
@@ -1489,7 +1472,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
            preDelayMs: 18, 
            rt60: 3.5
         });
-        roomTelemetryNode.port.onmessage = (e) => {
+        roomTelemetryNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      roomTelemetryNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'roomTelemetryNode');
+        probeCount('portMessages', 'roomTelemetryNode');
           // se quiser debugar a sala, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -1569,7 +1555,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         await loadModule('/lumina-mastering.js');
         const masteringNode = new AudioWorkletNode(audioCtx, 'lumina-mastering');
         masteringNode.port.postMessage({ enablePhaseRotation });
-        masteringNode.port.onmessage = (e) => {
+        masteringNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      masteringNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'masteringNode');
+        probeCount('portMessages', 'masteringNode');
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
         masteringRef.current = masteringNode;
@@ -1584,11 +1573,14 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const lufsNode = new AudioWorkletNode(audioCtx, 'lufs-meter');
         
         let lastLufsLogTime = 0;
-        lufsNode.port.onmessage = (msg) => {
+        lufsNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      lufsNode.port.onmessage = (msg) => {
+        probeCount('portHandlersRegistered', 'lufsNode');
+        probeCount('portMessages', 'lufsNode');
           if (msg.data && msg.data.lufs !== undefined) {
             const val = Math.round(msg.data.lufs * 10) / 10;
-            setLufsValue(val);
-            
+            lufsValueRef.current = val;
+
             // Log de telemetria a cada 5 segundos para não floodar o CMD
             const now = Date.now();
             if (now - lastLufsLogTime > 5000) {
@@ -1612,7 +1604,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         const wetParam = panner8DNode.parameters.get('wet');
         if (wetParam) wetParam.value = enable8D ? 0.20 : 0.0;
         
-        panner8DNode.port.onmessage = (e) => {
+        panner8DNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      panner8DNode.port.onmessage = () => {
+        probeCount('portHandlersRegistered', 'panner8DNode');
+        probeCount('portMessages', 'panner8DNode');
           // se quiser debugar o panner, descomente abaixo
           // if (e.data.type === 'telemetry') logToCMD(`DSP-${e.data.name}`, JSON.stringify(e.data), "info");
         };
@@ -1641,7 +1636,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           type: "state",
           isPlaying: isPlayingRef.current
         });
-        truePeakNode.port.onmessage = (e) => {
+        truePeakNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      truePeakNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'truePeakNode');
+        probeCount('portMessages', 'truePeakNode');
           if (e.data.type === 'telemetry') {
             const data = e.data;
             let reductionDb = 0.0;
@@ -1767,7 +1765,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
             };
             
             masterTelemetryRef.current = tele;
-            logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success");
+            logToCMD("DSP-MasterOut", JSON.stringify(tele), data.clipCount > 0 ? "error" : "success", 2000);
 
             const nowLog = Date.now();
             if (stabilizedRisk !== lastPerformanceGovernorRiskRef.current || nowLog - lastPerformanceGovernorLogTimeRef.current > 5000) {
@@ -1834,7 +1832,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         abComparatorNode.port.postMessage({ mode: abModeRef.current, blend: abBlendRef.current });
         
         let lastAbLogTime = 0;
-        abComparatorNode.port.onmessage = (e) => {
+        abComparatorNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      abComparatorNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'abComparatorNode');
+        probeCount('portMessages', 'abComparatorNode');
            if (e.data.type === 'telemetry') {
               const now = Date.now();
               if (now - lastAbLogTime > 2000) {
@@ -1878,7 +1879,10 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         });
         
         let lastScopeLogTime = 0;
-        stereoScopeNode.port.onmessage = (e) => {
+        stereoScopeNode.port.postMessage({ type: 'setTelemetryEnabled', enabled: !DISABLE_WORKLET_TELEMETRY });
+      stereoScopeNode.port.onmessage = (e) => {
+        probeCount('portHandlersRegistered', 'stereoScopeNode');
+        probeCount('portMessages', 'stereoScopeNode');
            if (e.data.type === 'telemetry') {
               stereoTelemetryRef.current = e.data;
               const now = Date.now();
@@ -1926,6 +1930,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const drawVisualizer = () => {
     if (!analyserRef.current || !canvasRef.current) {
+      probeCount('rafCreated', 'visualizer');
       animationRef.current = requestAnimationFrame(drawVisualizer);
       return;
     }
@@ -1938,6 +1943,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
     const dataArray = new Uint8Array(bufferLength);
     
     const draw = () => {
+      probeCount('rafCreated', 'visualizer');
       animationRef.current = requestAnimationFrame(draw);
       analyserRef.current.getByteFrequencyData(dataArray);
       
@@ -1966,7 +1972,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
   // Cleanup visualizer
   useEffect(() => {
     return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      if (animationRef.current) probeCount('rafCanceled', 'visualizer');
+      cancelAnimationFrame(animationRef.current);
     };
   }, []);
 
@@ -1998,7 +2005,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
         coverUrl: currentSong.thumbnail || '',
       });
     } else if (currentSong.file) {
-      const urlPath = currentSong.file.split(/[\\\/]/).map(encodeURIComponent).join('/');
+      const urlPath = currentSong.file.split(/[\\/]/).map(encodeURIComponent).join('/');
       const url = `${baseUrl}/downloads/${urlPath}`;
       
       // Fetch embedded lyrics & cover from backend
@@ -2083,7 +2090,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
               body: JSON.stringify({ artist, title })
             }).catch(()=>{});
           }
-        } catch(e) {}
+        } catch { /* Scrobbling must never interrupt playback. */ }
       }
 
 
@@ -2140,7 +2147,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       seekGateRef.current.gain.setValueAtTime(seekGateRef.current.gain.value, now);
       seekGateRef.current.gain.setTargetAtTime(0.0001, now, 0.015);
 
-      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+      if (seekTimeoutRef.current) probeCount('timeoutsCleared', 'seekTimeout'); clearTimeout(seekTimeoutRef.current);
+      probeCount('timeoutsCreated', 'seekTimeout');
       seekTimeoutRef.current = setTimeout(() => {
         resetAllDspStates('seek');
         if (audioRef.current) {
@@ -2231,8 +2239,6 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
 
   const lyricsContainerRef = useRef(null);
 
-  if (!currentSong) return null;
-
   useEffect(() => {
     if (activeLineIndex !== -1 && lyricsContainerRef.current && isExpanded) {
       const container = lyricsContainerRef.current;
@@ -2242,6 +2248,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
       }
     }
   }, [activeLineIndex, isExpanded]);
+
+  if (!currentSong) return null;
 
   const openExternal = async () => {
     if (!currentSong?.file) return;
@@ -2783,6 +2791,7 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           enableReplayGain={enableReplayGain} setEnableReplayGain={setEnableReplayGain}
           autoEqProfile={autoEqProfile} setAutoEqProfile={setAutoEqProfile}
           autoEqAmount={autoEqAmount} setAutoEqAmount={setAutoEqAmount}
+          autoEqWavInfo={autoEqWavInfo}
           abMode={abMode} setAbMode={setAbMode}
           abBlend={abBlend} setAbBlend={setAbBlend}
           presetIntensity={presetIntensity}
@@ -2797,6 +2806,8 @@ export function PlayerBar({ currentSong, onClose, onFinish, onNext, onPrev, isSh
           isOpen={showDiagnostics}
           onClose={() => setShowDiagnostics(false)}
           currentSong={currentSong}
+          isPlaying={isPlaying}
+          audioRef={audioRef}
           audioContextRef={audioContextRef}
           analyserRef={analyserRef}
           masterGainRef={masterGainRef}

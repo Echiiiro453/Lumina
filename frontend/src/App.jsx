@@ -12,6 +12,7 @@ import axios from 'axios';
 import { WindowControls } from './components/WindowControls';
 import qrcodeImg from './assets/qrcode_custom.jpg';
 import { applyThemeFromImage, resetTheme } from './utils/theme';
+import { isCompleted, isError, isTerminal } from './utils/downloadStatus';
 
 import { SettingsModal } from './components/SettingsModal';
 import { UpdateModal } from './components/UpdateModal';
@@ -27,6 +28,27 @@ import MobileSyncModal from './components/MobileSyncModal';
 import { SubscriptionsModal } from './components/SubscriptionsModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { SkeletonCard, SkeletonPlaylistItem, QualityOption, ToastContainer } from './components/UIComponents';
+
+// R2.4: mapeia o error_code estável do backend (JobState.error_code) para uma dica de UI
+// acionável. Retorna string (já localizada) ou '' quando não há dica — assim o chamador
+// nunca cola a dica cega de cookies para erros que não são de login. Antes a UI chutava
+// pela ausência de login (!isAuthenticated), o que era incorreto para 429/formato/etc.
+const errorHint = (code, tt) => {
+  switch (code) {
+    case 'AUTH_REQUIRED':
+      return tt('errHintAuthRequired') || '⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.';
+    case 'RATE_LIMITED':
+      return tt('errHintRateLimited') || '⚠️ Dica: O YouTube limitou a sua conexão (429). Aguarde alguns minutos e tente novamente.';
+    case 'FORMAT_NOT_FOUND':
+      return tt('errHintFormatNotFound') || '⚠️ Dica: O formato pedido não está disponível para este vídeo. Tente outra qualidade.';
+    case 'TIMEOUT':
+      return tt('errHintTimeout') || '⚠️ Dica: O download excedeu o tempo limite (4h). Tente novamente ou use um formato menor.';
+    default:
+      // DOWNLOAD_FAILED / UNKNOWN / sem código: sem dica específica — só a mensagem do backend.
+      return '';
+  }
+};
+
 // Helper para detectar modo automaticamente (Music vs Video)
 const detectMode = (url) => {
   if (!url) return 'video';
@@ -59,7 +81,6 @@ function App() {
   const [quality, setQuality] = useState('320'); // Default: Ultra MP3
   const [subtitle, setSubtitle] = useState('none');
   const [mode, setMode] = useState('audio'); // 'audio' | 'video'
-  const [playlist, setPlaylist] = useState(false); // Baixar playlist inteira?
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(null); // 'success', 'error'
   const [message, setMessage] = useState('');
@@ -148,7 +169,7 @@ function App() {
   }, [resolvedWallpaper]);
 
   // Advanced Toasts
-  const [toasts, setToasts] = useState([]);
+  const [, setToasts] = useState([]);
 
   const addToast = (title, type = 'info', action = null) => {
     const id = Date.now() + Math.random();
@@ -169,7 +190,7 @@ function App() {
   const [pitch, setPitch] = useState(0); // -12 to +12
 
   // Language state – changing this triggers full re-render so translations update
-  const [lang, setLang] = useState(getLanguage());
+  const [, setLang] = useState(getLanguage());
 
   const handleLanguageChange = (code) => {
     setLanguage(code);
@@ -201,34 +222,16 @@ function App() {
   const [showShazamModal, setShowShazamModal] = useState(false);
   const [showMobileSync, setShowMobileSync] = useState(false);
   const [showSubscriptionsModal, setShowSubscriptionsModal] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuTimeoutRef = React.useRef(null);
-
-  const handleMenuEnter = () => {
-    if (menuTimeoutRef.current) {
-      clearTimeout(menuTimeoutRef.current);
-      menuTimeoutRef.current = null;
-    }
-    setIsMenuOpen(true);
-  };
-
-  const handleMenuLeave = () => {
-    menuTimeoutRef.current = setTimeout(() => {
-      setIsMenuOpen(false);
-    }, 500); // Tolerância de 500ms
-  };
-
   // Playlist Manager
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [playlistVideos, setPlaylistVideos] = useState([]);
   const [selectedVideos, setSelectedVideos] = useState(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
-  const [resolvedUrl, setResolvedUrl] = useState('');
+  const [resolvedUrl] = useState('');
 
   // Integrated Search
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Queue System (Batch Download)
   const [queue, setQueue] = useState([]);
@@ -244,7 +247,7 @@ function App() {
       const saved = localStorage.getItem('saved_queue');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const pendingItems = parsed.filter(item => item.status !== 'completed' && item.status !== 'error');
+        const pendingItems = parsed.filter(item => !isTerminal(item.status));
         if (pendingItems.length > 0) {
           setSavedQueueData(parsed);
           setShowResumePrompt(true);
@@ -259,7 +262,7 @@ function App() {
 
   // Ctrl+V / Cmd+V: Auto-paste URL from clipboard into the search bar
   useEffect(() => {
-    const handlePaste = async (e) => {
+    const handlePaste = async () => {
       const active = document.activeElement;
       const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
       if (isTyping) return; // Don't interfere when user is typing in a field
@@ -275,7 +278,7 @@ function App() {
           if (detected === 'audio') setMode('audio');
           addToast('🔗 URL colada automaticamente!', 'success');
         }
-      } catch (err) {
+      } catch {
         // Clipboard permission denied — fail silently
       }
     };
@@ -373,7 +376,7 @@ function App() {
       } else if (manual) {
         alert("Você já está usando a versão mais recente!");
       }
-    } catch (e) {
+    } catch {
       if (manual) alert("Erro ao checar atualizações.");
     } finally {
       setIsCheckingUpdate(false);
@@ -391,6 +394,7 @@ function App() {
   const [consecutiveDownloads, setConsecutiveDownloads] = useState([]);
   const consecutiveDownloadsRef = React.useRef([]);
   const frozenDownloadOptionsRef = React.useRef(null);
+  const activeDownloadUrlRef = React.useRef(null);
 
   const replaceConsecutiveDownloads = (updater) => {
     const previous = consecutiveDownloadsRef.current;
@@ -399,9 +403,43 @@ function App() {
     setConsecutiveDownloads(next);
   };
 
+  const prepareConsecutiveDownloadPreview = (downloadUrl) => {
+    activeDownloadUrlRef.current = downloadUrl;
+    setUrl(downloadUrl);
+    setDownloadInfo(null);
+    setStatus(null);
+    setMessage('');
+    setStep('downloading');
+    setProgress({ percent: 0, status: 'queued' });
+    setMetadata({
+      url: downloadUrl,
+      title: 'Carregando informações do próximo vídeo...',
+      thumbnail: null
+    });
+  };
+
   const submitConsecutiveDownload = async (downloadUrl) => {
     const options = frozenDownloadOptionsRef.current;
     if (!options) throw new Error('Configuração inicial do download não encontrada.');
+
+    // The download endpoint only creates the job; it does not replace the
+    // metadata shown by the confirmation/download card. Clear the previous
+    // video's data immediately and resolve the next video's title/cover in
+    // parallel so a slow /info response does not delay the actual download.
+    prepareConsecutiveDownloadPreview(downloadUrl);
+
+    axios.post(getApiUrl('/info'), { url: downloadUrl })
+      .then(infoResponse => {
+        if (activeDownloadUrlRef.current === downloadUrl) {
+          setMetadata({ ...infoResponse.data, url: infoResponse.data.url || downloadUrl });
+        }
+      })
+      .catch(error => {
+        // Metadata is visual-only here. The download may still succeed through
+        // a backend fallback, so do not abort the consecutive queue.
+        console.warn('Falha ao atualizar metadados do download consecutivo:', error);
+      });
+
     const response = await axios.post(getApiUrl('/download'), { ...options, url: downloadUrl });
     setProgress({ percent: 0, status: 'queued' });
     setCurrentJobId(response.data.job_id);
@@ -427,7 +465,11 @@ function App() {
     else addToast('Download concluído; iniciando o próximo link.', 'success');
     submitConsecutiveDownload(next.url).catch(error => {
       addToast(error.response?.data?.detail || 'Falha ao iniciar o próximo download.', 'error');
-      startNextConsecutiveDownload(true);
+      if (!startNextConsecutiveDownload(true)) {
+        setMessage(error.response?.data?.detail || 'Falha ao iniciar o próximo download.');
+        setStatus('error');
+        setStep('confirm');
+      }
     });
     return true;
   };
@@ -459,7 +501,7 @@ function App() {
             return;
           }
           setGlobalJobs(data);
-        } catch (e) {}
+        } catch { /* Ignore malformed WebSocket payloads. */ }
       };
       ws.onclose = () => {
         reconnectTimer = setTimeout(connectWs, 3000);
@@ -477,6 +519,15 @@ function App() {
     if (step === 'downloading' && currentJobId) {
       const job = globalJobs[currentJobId];
       if (job) {
+        const liveTitle = job.title || job.filename;
+        if (liveTitle) {
+          setMetadata(prev => ({
+            ...(prev || {}),
+            url: prev?.url || activeDownloadUrlRef.current,
+            title: liveTitle,
+            thumbnail: prev?.thumbnail || job.thumbnail || job.cover_path || null
+          }));
+        }
         if (job.progress !== undefined) {
           setProgress({ 
             percent: job.progress, 
@@ -486,7 +537,8 @@ function App() {
             total: job.total_bytes_str
           });
         }
-        if (job.status === 'done') {
+        // R2.5: o backend usa `done`; aceitar também `completed` (legado da UI).
+        if (isCompleted(job.status)) {
           if (startNextConsecutiveDownload(false)) return;
           setDownloadInfo({
             status: 'success',
@@ -497,13 +549,14 @@ function App() {
           addToast(t('statusDone') || 'Download concluído!', 'success', { label: t('openFolder'), onClick: openDownloadsFolder });
           setStep('result');
           setCurrentJobId(null);
-        } else if (job.status === 'error' || job.status === 'timeout') {
+        } else if (isError(job.status)) {
           if (startNextConsecutiveDownload(true)) return;
           addToast(t('statusError') || 'Falha no download.', 'error');
+          // R2.4: ramifica a dica pelo error_code estável (backend), em vez de chutar
+          // pela ausência de login. O corpo (job.error) continua sendo a mensagem do backend.
           let errMsg = job.error || t('statusError');
-          if (!isAuthenticated) {
-            errMsg += "\n\n⚠️ Dica: Você está sem login (cookies.txt). Vá nas configurações, adicione seus cookies e tente novamente! O YouTube bloqueia downloads sem login.";
-          }
+          const hint = errorHint(job.error_code, t);
+          if (hint) errMsg += '\n\n' + hint;
           setMessage(errMsg);
           setStatus('error');
           setStep('confirm');
@@ -651,16 +704,6 @@ function App() {
     setSelectedVideos(newSelected);
   };
 
-  const selectAllVideos = () => {
-    // Select ONLY pending
-    const pendingIndices = new Set(
-      playlistVideos
-        .filter(v => v.status !== 'downloaded')
-        .map(v => v.index)
-    );
-    setSelectedVideos(pendingIndices);
-  };
-
   const deselectAllVideos = () => {
     setSelectedVideos(new Set());
   };
@@ -727,55 +770,6 @@ function App() {
     }, 500);
   };
 
-  const handleBatchEnqueue = (urlsList) => {
-    if (urlsList.length === 0) return;
-
-    // --- COOKIE ENFORCEMENT ---
-    if (!isAuthenticated) {
-      const confirmUpload = window.confirm(
-        `⚠️ ATENÇÃO: Você está tentando iniciar downloads sem login (sem cookies.txt).\n\n` +
-        `Isso tem uma alta chance de resultar em erros no download ou banimento/bloqueio temporário do seu IP pelo YouTube.\n\n` +
-        `Clique em OK para enviar seus cookies agora (Recomendado), ou CANCELAR para prosseguir por sua conta e risco.`
-      );
-
-      if (confirmUpload) {
-        setShowSettings(true);
-        return;
-      }
-    }
-    // ---------------------------
-
-    const queueItems = urlsList.map((url, idx) => {
-      const displayTitle = url.length > 50 ? url.substring(0, 50) + '...' : url;
-      return {
-        id: undefined,
-        title: displayTitle,
-        thumbnail: null,
-        uploader: 'Lote',
-        duration_string: '—',
-        url: url,
-        uniqueId: Date.now() + Math.random() + idx,
-        pitch: mode === 'audio' ? pitch : 0,
-        speed: mode === 'audio' ? speed : 1.0,
-        subtitle: mode === 'video' ? subtitle : 'none',
-        status: 'pending',
-        progress: 0,
-        addedAt: Date.now()
-      };
-    });
-
-    setQueue(prev => [...prev, ...queueItems]);
-    setShowQueue(true);
-
-    addToast(t('batchAddedToast') ? t('batchAddedToast').replace('x', queueItems.length) : `${queueItems.length} links adicionados à fila!`, 'success');
-
-    // Tentar iniciar automaticamente após render
-    setTimeout(() => {
-      const startBtn = document.getElementById('start-downloads-btn');
-      if (startBtn) startBtn.click();
-    }, 500);
-  };
-
   // ===== REDOWNLOAD LOGIC =====
   const executeRetry = async (video, playlistId) => {
     try {
@@ -784,7 +778,7 @@ function App() {
         return;
       }
       addToast(`Reiniciando download: ${video.title}`, 'info');
-      const res = await axios.post(getApiUrl('/download/retry'), {
+      await axios.post(getApiUrl('/download/retry'), {
         playlist_id: playlistId,
         video_id: video.id
       });
@@ -860,65 +854,6 @@ function App() {
   };
 
   // Independent Downloader Function
-  const downloadItem = async (item) => {
-    updateQueueItem(item.uniqueId, { status: 'downloading', progress: 0 });
-
-    try {
-      const downloadUrl = item.url || `https://www.youtube.com/watch?v=${item.id}`;
-
-      // Enqueue
-      const response = await axios.post(getApiUrl('/download'), {
-        url: downloadUrl,
-        quality: quality,
-        mode: mode,
-        pitch: item.pitch !== undefined ? item.pitch : pitch,
-        speed: item.speed !== undefined ? item.speed : speed,
-        organize: organizeByArtist,
-        organize_by_playlist: organizeByPlaylist,
-        sponsorblock_enabled: sponsorblockEnabled,
-        video_codec: videoCodec,
-        compress_video: compressVideo
-      });
-
-      const { job_id } = response.data;
-
-      // Poll
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await axios.get(getApiUrl(`/download/status/${job_id}`));
-          const statusData = statusRes.data;
-
-          if (statusData.status === 'downloading') {
-            updateQueueItem(item.uniqueId, {
-              status: 'downloading',
-              progress: statusData.progress || 1
-            });
-          } else if (statusData.status === 'processing') {
-            updateQueueItem(item.uniqueId, { status: 'processing', progress: 99 });
-          } else if (statusData.status === 'done') {
-            clearInterval(pollInterval);
-            updateQueueItem(item.uniqueId, { status: 'completed', progress: 100 });
-          } else if (statusData.status === 'error') {
-            clearInterval(pollInterval);
-            let queueErrMsg = statusData.error || 'Erro';
-              if (!isAuthenticated) {
-                  queueErrMsg += ' (Dica: Adicione seus cookies.txt nas configurações!)';
-              }
-              updateQueueItem(item.uniqueId, { status: 'error', error: queueErrMsg });
-          }
-        } catch (e) {
-          console.error(e);
-          clearInterval(pollInterval);
-          updateQueueItem(item.uniqueId, { status: 'error', error: 'Poll failed' });
-        }
-      }, 1000);
-
-    } catch (error) {
-      console.error(error);
-      updateQueueItem(item.uniqueId, { status: 'error', progress: 0 });
-    }
-  };
-
   // Queue Monitor Effect
   React.useEffect(() => {
     if (!isProcessingQueue) return;
@@ -1035,14 +970,17 @@ function App() {
   };
 
   const loadVideoDetails = async (videoUrl) => {
+    activeDownloadUrlRef.current = videoUrl;
     setLoading(true);
     setMetadata(null); // Force clear previous data
     setMessage('');
     console.log("📥 Loading Info for:", videoUrl);
     try {
       const response = await axios.post(getApiUrl('/info'), { url: videoUrl });
-      setMetadata(response.data);
-      setStep('confirm');
+      if (activeDownloadUrlRef.current === videoUrl) {
+        setMetadata({ ...response.data, url: response.data.url || videoUrl });
+        setStep('confirm');
+      }
     } catch (error) {
       console.error(error);
       setStatus('error');
@@ -1113,6 +1051,7 @@ function App() {
       organize_by_playlist: organizeByPlaylist,
       sponsorblock_enabled: sponsorblockEnabled
     };
+    activeDownloadUrlRef.current = metadata.url;
 
     try {
       // 1. Enqueue Task (agora /download também retorna job_id imediatamente)
@@ -1139,6 +1078,7 @@ function App() {
 
   // ... (reset function needs to clear progress too)
   const reset = () => {
+    activeDownloadUrlRef.current = null;
     setStep('search');
     setUrl('');
     setMetadata(null);
@@ -1199,7 +1139,7 @@ function App() {
               </div>
               <h2 className="text-2xl font-bold">{t('resumeTitle')}</h2>
               <p className="text-secondary text-sm">
-                {t('resumeDesc', savedQueueData.filter(i => i.status !== 'completed' && i.status !== 'error').length)}
+                {t('resumeDesc', savedQueueData.filter(i => !isTerminal(i.status)).length)}
               </p>
               
               <div className="flex gap-4 w-full">
@@ -1215,7 +1155,7 @@ function App() {
                 <RippleButton
                   onClick={() => {
                     const queueToRestore = savedQueueData.map(item => {
-                      if (item.status !== 'completed' && item.status !== 'error') {
+                      if (!isTerminal(item.status)) {
                         return { ...item, status: 'pending', progress: 0, jobId: null };
                       }
                       return item;
@@ -2026,7 +1966,7 @@ function App() {
                     </div>
                     <div className="flex gap-2">
                       <input value={nextDownloadInput} onChange={(event) => setNextDownloadInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addConsecutiveDownload(); } }} placeholder="Cole o próximo link aqui..." className="min-w-0 flex-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-4 py-2 text-sm text-on-surface outline-none focus:border-primary" />
-                      <button onClick={addConsecutiveDownload} className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary/90"><Plus size={17} /></button>
+                      <button onClick={addConsecutiveDownload} className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary hover:bg-primary/90"><Plus size={17} /><span>Adicionar</span></button>
                     </div>
                     {consecutiveDownloads.length > 0 && <div className="space-y-2">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-primary">A seguir ({consecutiveDownloads.length})</p>
@@ -2106,7 +2046,7 @@ function App() {
           <div className="relative">
             <List size={24} />
             <div className="absolute -top-2 -right-2 bg-white text-black text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-md">
-              {queue.filter(i => i.status !== 'completed').length}
+              {queue.filter(i => !isTerminal(i.status)).length}
             </div>
           </div>
           <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 font-medium whitespace-nowrap">

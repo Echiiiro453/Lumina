@@ -8,6 +8,7 @@
 class SubMonoProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.active = false;
         const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     const fc = 80, Q = 0.707;
@@ -41,6 +42,7 @@ class SubMonoProcessor extends AudioWorkletProcessor {
     this.harmSvfR = new Float32Array(2);
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.bassRecovery !== undefined) {
         this.bassRecovery = Math.max(0, Math.min(e.data.bassRecovery, 2.0));
@@ -133,8 +135,7 @@ class SubMonoProcessor extends AudioWorkletProcessor {
         const samples = 60 * inL.length;
         const harmRms = Math.sqrt(this._dbgHarm / samples);
         
-        this.port.postMessage({
-          type: 'telemetry',
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: 'SubMono',
           widthBefore: widthBefore.toFixed(3),
           widthAfter: "0.000",

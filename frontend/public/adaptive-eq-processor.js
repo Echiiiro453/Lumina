@@ -10,11 +10,13 @@
 class AdaptiveEQProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.targetActive = 0.0;
     this.currentActive = 0.0;
     this.isFirstMessage = true;
 
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) {
         this.targetActive = e.data.active ? 1.0 : 0.0;
         if (this.isFirstMessage) {

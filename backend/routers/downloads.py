@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 from utils import get_downloads_dir, clean_url
 from database import add_job_to_queue, mark_missing_db, get_download_record
-from downloader import jobs, download_queue, JobState
+from downloader import jobs, download_queue, JobState, ERROR_CODE_CANCELLED
 
 router = APIRouter()
 
@@ -67,6 +67,7 @@ async def enqueue_download(req: DownloadRequest):
 async def cancel_download(job_id: str):
     if job_id in jobs:
         jobs[job_id].status = "cancelled"
+        jobs[job_id].error_code = ERROR_CODE_CANCELLED
         jobs[job_id].error = "Cancelado pelo usuário"
         return {"job_id": job_id, "status": "cancelled"}
     raise HTTPException(status_code=404, detail="Job not found")

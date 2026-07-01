@@ -1,7 +1,7 @@
 class StereoScopeProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-
+    this.telemetryEnabled = true;
     this.frame = 0;
     this.EPS = 1e-12;
     this.sideGain = 1.0;
@@ -10,8 +10,15 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
     this.rescueActive = false;
     this.antiPhaseCounter = 0;
 
+    // Handler ÚNICO: o handler de setTelemetryEnabled antes ficava inalcançável porque
+    // uma segunda atribuição a port.onmessage logo abaixo o sobrescrevia.
     this.port.onmessage = ({ data }) => {
-      if (data && data.phaseRescue !== undefined) {
+      if (!data) return;
+      if (data.type === 'setTelemetryEnabled') {
+        this.telemetryEnabled = !!data.enabled;
+        return;
+      }
+      if (data.phaseRescue !== undefined) {
         this.phaseRescueEnabled = !!data.phaseRescue;
       }
     };
@@ -132,8 +139,7 @@ class StereoScopeProcessor extends AudioWorkletProcessor {
       if (corr < 0.0) phaseRisk = "HIGH";
       else if (corr < 0.5) phaseRisk = "MEDIUM";
 
-      this.port.postMessage({
-        type: "telemetry",
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: "StereoScope",
         corr: corr.toFixed(2),
         midRMSDb: (20 * Math.log10(midRMS + this.EPS)).toFixed(1),

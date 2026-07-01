@@ -3,6 +3,8 @@ node_modules/
 backend/venv/
 backend/__pycache__/
 *.py[cod]
+**/.vite/
+coverage/
 
 # Environment variables
 .env
@@ -42,16 +44,23 @@ backend/build_log_v*.txt
 
 # Logs
 *.log
+frontend/lint_output.txt
 
 # Cookies (Security)
 cookies.txt
+**/cookies.txt
+**/cookies-*.txt
 
 # Debug and Test scripts
-test_*.py
+/test_*.py
 repro_*.py
 debug_*.py
 verify_*.py
 install_ffmpeg.py
+
+# Preserve real backend tests
+!backend/tests/
+!backend/tests/**/*.py
 
 # Temporary snippets
 frontend/*.txt
@@ -65,15 +74,22 @@ backend/yt_dlp.log
 backend/crash_log.txt
 backend/build_log.txt
 backend/history.json
+backend/output.json
+backend/custom_wallpaper.*
+backend/deno/
+backend/test_out/
+backend/split_output/
 *.db
 *.db-journal
 *.db-shm
 *.db-wal
+*.tmp
+*.temp
+*.tsbuildinfo
  
 
 # Pastas de limpeza
 /debug/
-/archive/
 
 # Pesquisas de IA
 /resultado_ia/
@@ -99,6 +115,8 @@ frontend/src/refactor*.py
 # Arquivos de resultados de testes/bateria
 battery_results.txt
 *_results.txt
+!tests/manual/results/
+!tests/manual/results/**
 
 # Scripts de lote (.bat) - Ignorar auxiliares como enviar_github.bat, mas preservar os do app
 *.bat

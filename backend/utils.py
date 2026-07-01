@@ -1,5 +1,12 @@
 import os
+import re
 import sys
+
+
+class SafePathError(Exception):
+    """Levantada quando um file_path resolve para fora do diretório raiz permitido
+    (path traversal) ou não existe. Chamadores FastAPI devem converter em HTTPException."""
+    pass
 
 def get_base_dir():
     if getattr(sys, 'frozen', False):
@@ -91,12 +98,42 @@ def get_cookies_path():
     user_path = os.path.join(get_data_dir(), 'cookies.txt')
     if os.path.exists(user_path):
         return user_path
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        bundled_path = os.path.join(sys._MEIPASS, 'cookies.txt')
-        if os.path.exists(bundled_path):
-            return bundled_path
+    # NOTA: o fallback _MEIPASS/cookies.txt foi removido propositalmente. Cookies NUNCA
+    # devem vir de dentro do executável empacotado — se alguém deixar um cookies.txt ao
+    # lado do source na hora do build, ele seria embutido e a sessão vazaria dentro do
+    # Lumina.exe. Cookies ficam exclusivamente no data dir do usuário (via /upload_cookies).
     return None
 
+
+
+def sanitize_paths(text, root=None):
+    """Mascara paths absolutos em texto de log (yt-dlp/FFmpeg stderr) por <path>/basename.
+
+    stderr/stdout de subprocess frequentemente contêm o caminho absoluto do arquivo do
+    usuário (ex.: 'C:\\Users\\nome\\Music\\faixa.mp3'). Isso evita vazar o nome de usuário
+    e estrutura de pastas para o log buffer que é exposto em /api/logs.
+
+    Mantém o basename (útil p/ debug) e troca o diretório por <path>.
+    """
+    if not text:
+        return text
+    if root is None:
+        try:
+            root = get_downloads_dir()
+        except Exception:
+            root = None
+
+    def _mask(m):
+        full = m.group(0)
+        base = os.path.basename(full.rstrip("/\\"))
+        return f"<path>/{base}" if base else "<path>"
+
+    # Windows: letra:\...\ ; Unix: /home/... , /Users/... , /mnt|media|tmp|var|opt/...
+    pattern = r'(?:[A-Za-z]:[\\/][^\s"\']+|/(?:home|Users|mnt|media|tmp|var|opt)[^\s"\']*)'
+    out = re.sub(pattern, _mask, text)
+    if root:
+        out = out.replace(root, "<downloads>")
+    return out
 
 
 def clean_url(url: str) -> str:
@@ -110,3 +147,59 @@ def clean_url(url: str) -> str:
         return urllib.parse.urlunparse(parsed._replace(query=new_query))
     except:
         return url
+
+
+def safe_resolve(file_path, root=None, must_exist=True, allow_dirs=False):
+    """Resolve file_path de forma segura dentro de root (default: downloads dir).
+
+    Bloqueia path traversal (..) e paths absolutos que escapem do root. Resolve symlinks
+    via os.path.realpath antes de comparar com os.path.commonpath, evitando bypass por
+    links simbólicos.
+
+    - file_path: pode ser relativo (junta a root) ou absoluto (precisa estar dentro de root).
+    - root: diretório raiz permitido. Default get_downloads_dir().
+    - must_exist: se True (default), levanta SafePathError se o arquivo não existir.
+    - allow_dirs: se True, aceita diretórios (default exige arquivo regular).
+
+    Retorna o caminho absoluto (str) dentro de root.
+    Levanta SafePathError em caso de traversal/inexistência.
+    """
+    if root is None:
+        root = get_downloads_dir()
+    root_real = os.path.realpath(root)
+
+    candidate = file_path
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(root_real, candidate)
+    abs_path = os.path.realpath(candidate)
+
+    # commonpath exige que ambos existam; compara as strings de realpath para travessia.
+    try:
+        if os.path.commonpath([abs_path, root_real]) != root_real:
+            raise SafePathError("Caminho fora da biblioteca")
+    except ValueError:
+        # commonpath levanta ValueError se os paths estiverem em drives distintos (Windows)
+        raise SafePathError("Caminho fora da biblioteca")
+
+    if must_exist and not os.path.exists(abs_path):
+        raise SafePathError("Arquivo não encontrado")
+
+    if must_exist and not allow_dirs and not os.path.isfile(abs_path):
+        raise SafePathError("Caminho não é um arquivo")
+
+    return abs_path
+
+
+def raise_with_code(status_code: int, detail: str, code=None):
+    """Ergue um HTTPException com `code` estável além de `detail` (R2.4).
+
+    `code` viaja pelo header X-Error-Code, que o handler global em main.py devolve no
+    JSON como {"detail": ..., "code": ...}. `code=None` (default) mantém o comportamento
+    antigo — usar só onde já se sabe classificar (ex: AUTH_REQUIRED / RATE_LIMITED).
+    Importo HTTPException aqui dentro para manter utils.py sem depender de FastAPI no
+    top-level (utils é importado cedo, inclusive por módulos sem app FastAPI).
+    """
+    from fastapi import HTTPException
+    headers = {"X-Error-Code": code} if code else None
+    raise HTTPException(status_code=status_code, detail=detail, headers=headers)
+

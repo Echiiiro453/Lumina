@@ -11,6 +11,7 @@
 class TransientShaperProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.active = false;
     
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
@@ -36,6 +37,7 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
     this.isFirstMessage = true;
 
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) {
         this.targetActive = e.data.active ? 1.0 : 0.0;
         if (this.isFirstMessage) {

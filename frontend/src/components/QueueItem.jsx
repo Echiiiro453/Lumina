@@ -1,5 +1,6 @@
 import React from 'react';
 import { Play, X, Zap, RotateCcw, CheckCircle2, Clock, AlertCircle, Loader2 } from 'lucide-react';
+import { isCompleted, isError } from '../utils/downloadStatus';
 
 export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry }) => {
     const displayStatus = job?.status || item.status;
@@ -11,36 +12,36 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
     const downloadedBytes = job?.downloaded_bytes_str;
 
     const isDownloading = displayStatus === 'downloading' || displayStatus === 'running' || displayStatus === 'processing';
-    const isCompleted   = displayStatus === 'done' || displayStatus === 'completed';
-    const isError       = displayStatus === 'error' || displayStatus === 'timeout';
+    const isCompletedItem = isCompleted(displayStatus);
+    const isErrorItem     = isError(displayStatus);
     const isPending     = displayStatus === 'pending' || displayStatus === 'queued';
     const showProgress  = isDownloading && displayProgress > 0 && displayProgress < 99;
 
     const getStatusLabel = () => {
         if (isPending && displayStatus === 'queued') return 'Na fila';
         if (isPending)       return 'Aguardando';
-        if (isCompleted)     return 'Concluído';
-        if (isError)         return displayStatus === 'timeout' ? 'Tempo excedido' : 'Erro';
+        if (isCompletedItem)     return 'Concluído';
+        if (isErrorItem)         return displayStatus === 'timeout' ? 'Tempo excedido' : 'Erro';
         if (displayStatus === 'processing') return 'Finalizando...';
         if (isDownloading && displayProgress >= 98) return 'Finalizando...';
         if (isDownloading)   return `${displayProgress.toFixed(0)}%`;
         return displayStatus;
     };
 
-    const statusColor = isCompleted ? 'text-green-400'
-        : isError   ? 'text-red-400'
+    const statusColor = isCompletedItem ? 'text-green-400'
+        : isErrorItem   ? 'text-red-400'
         : isDownloading ? 'text-primary'
         : 'text-on-surface-variant';
 
-    const StatusIcon = isCompleted ? CheckCircle2
-        : isError   ? AlertCircle
+    const StatusIcon = isCompletedItem ? CheckCircle2
+        : isErrorItem   ? AlertCircle
         : isDownloading ? Loader2
         : Clock;
 
     return (
         <div className={`relative flex items-center gap-3 p-3 rounded-2xl overflow-hidden transition-all duration-300
-            ${isCompleted ? 'bg-green-500/5 border border-green-500/15'
-            : isError     ? 'bg-red-500/5 border border-red-500/15'
+            ${isCompletedItem ? 'bg-green-500/5 border border-green-500/15'
+            : isErrorItem     ? 'bg-red-500/5 border border-red-500/15'
             : isDownloading ? 'bg-primary/5 border border-primary/20'
             : 'bg-on-surface/[0.03] border border-transparent hover:border-outline-variant/20'}`}
         >
@@ -82,7 +83,7 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
                         className={`flex-shrink-0 ${statusColor} ${isDownloading && displayStatus !== 'processing' ? 'animate-spin' : ''}`}
                     />
                     <span className={`text-xs font-medium ${statusColor}`}>{getStatusLabel()}</span>
-                    {isError && error && (
+                    {isErrorItem && error && (
                         <span className="text-[10px] text-red-400/70 truncate">— {error}</span>
                     )}
                 </div>
@@ -103,7 +104,7 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
             {/* Actions */}
             <div className="flex items-center gap-1 flex-shrink-0">
                 {/* Play button when completed */}
-                {isCompleted && setCurrentSong && (
+                {isCompletedItem && setCurrentSong && (
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -118,7 +119,7 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
                 )}
 
                 {/* Retry button on error */}
-                {isError && onRetry && (
+                {isErrorItem && onRetry && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onRetry(item); }}
                         className="p-2 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded-full transition-all"
@@ -129,7 +130,7 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
                 )}
 
                 {/* Cancel / Remove button */}
-                {!isCompleted && (
+                {!isCompletedItem && (
                     <button
                         onClick={(e) => { e.stopPropagation(); removeFromQueue(item.uniqueId); }}
                         className="p-2 hover:bg-red-500/20 text-on-surface-variant hover:text-red-400 rounded-full transition-all"
@@ -140,7 +141,7 @@ export const QueueItem = ({ item, removeFromQueue, setCurrentSong, job, onRetry 
                 )}
 
                 {/* Remove completed */}
-                {isCompleted && (
+                {isCompletedItem && (
                     <button
                         onClick={(e) => { e.stopPropagation(); removeFromQueue(item.uniqueId); }}
                         className="p-2 hover:bg-white/10 text-on-surface-variant/40 hover:text-on-surface-variant rounded-full transition-all"

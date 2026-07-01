@@ -98,18 +98,25 @@ class ZipRequest(BaseModel):
 
 def create_zip_job(job_id, files_to_zip):
     try:
+        from utils import safe_resolve, SafePathError
         d_dir = get_downloads_dir()
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-        
+
         with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
             total = len(files_to_zip)
             for i, filename in enumerate(files_to_zip):
-                filepath = os.path.join(d_dir, filename)
+                # Cada filename deve resolver dentro da biblioteca (bloqueia ../../).
+                # Proteção portada de main.py (PR 5.1) — antes era os.path.join cru.
+                try:
+                    filepath = safe_resolve(filename, root=d_dir)
+                except SafePathError:
+                    zip_jobs[job_id]["progress"] = int(((i + 1) / total) * 100)
+                    continue
                 if os.path.exists(filepath):
-                    zf.write(filepath, filename)
+                    zf.write(filepath, os.path.basename(filename))
                 zip_jobs[job_id]["progress"] = int(((i + 1) / total) * 100)
                 zip_jobs[job_id]["current_file"] = filename
-                
+
         tmp.close()
         zip_jobs[job_id]["status"] = "done"
         zip_jobs[job_id]["filepath"] = tmp.name
@@ -578,18 +585,10 @@ def mobile_ui(request: Request, token: str = None):
     """
     return HTMLResponse(content=html)
 
-from utils import get_downloads_dir, get_data_dir
-try:
-    os.makedirs(get_downloads_dir(), exist_ok=True)
-    app.mount("/downloads", StaticFiles(directory=get_downloads_dir()), name="downloads")
-except Exception as e:
-    print(f"Could not mount downloads dir: {e}")
-
-try:
-    os.makedirs(get_data_dir(), exist_ok=True)
-    app.mount("/data", StaticFiles(directory=get_data_dir()), name="data")
-except Exception as e:
-    print(f"Could not mount data dir: {e}")
+# NOTE: os app.mount('/downloads', ...) e app.mount('/data', ...) que existiam aqui foram
+# removidos — eles referenciavam 'app', que não é importado neste módulo de router, gerando
+# sempre "Could not mount downloads dir: name 'app' is not defined". Esses mounts já existem
+# em main.py (linha ~2042/2048) e são a fonte correta. PR 6.3c.
 
 # --- VOICE ENGINE API ROUTES ---
 

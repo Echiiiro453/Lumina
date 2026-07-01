@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import axios from 'axios';
 import { Settings, CheckCircle, AlertCircle, Upload, Mic, Power, Terminal, Database, RefreshCw, Globe, Palette, Download, Monitor, Cloud } from 'lucide-react';
@@ -7,6 +7,7 @@ import { LogViewerModal } from './LogViewerModal';
 import { t, setLanguage, getLanguage, LANGUAGES } from '../i18n';
 
 export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArtist, setOrganizeByArtist, onUploadSuccess, apiUrl, onLanguageChange, wallpaper, setWallpaper, blurLevel, setBlurLevel }) {
+  const voicePollRef = useRef(null);
   const [downloadFolder, setDownloadFolder] = React.useState('');
   const [showLogs, setShowLogs] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -28,13 +29,22 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     }
   }, [isOpen]);
 
-  
-  
+  // Limpa o poll de voz quando o componente desmonta (evita setState após unmount)
+  useEffect(() => {
+    return () => {
+      if (voicePollRef.current) {
+        clearInterval(voicePollRef.current);
+        voicePollRef.current = null;
+      }
+    };
+  }, []);
+
+
   const handleSaveTelegram = async () => {
     try {
       await axios.post(`${apiUrl}/api/settings/telegram`, { token: telegramToken, chat_id: telegramChatId, enabled: telegramEnabled });
       // saved silently or toast
-    } catch(e) { }
+    } catch { /* Settings save failures are surfaced by the next status refresh. */ }
   };
 
   const handleTestTelegram = async () => {
@@ -77,11 +87,22 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
       const res = await axios.post(`${apiUrl}/api/voice/toggle`);
       setVoiceStatus(res.data.status);
       if (res.data.status === 'downloading') {
+          // Limpa qualquer poll anterior antes de iniciar um novo
+          if (voicePollRef.current) clearInterval(voicePollRef.current);
           // Poll every 3 seconds while downloading
-          const interval = setInterval(async () => {
-              const check = await axios.get(`${apiUrl}/api/voice/status`);
-              setVoiceStatus(check.data.status);
-              if (check.data.status !== 'downloading') clearInterval(interval);
+          voicePollRef.current = setInterval(async () => {
+              try {
+                const check = await axios.get(`${apiUrl}/api/voice/status`);
+                setVoiceStatus(check.data.status);
+                if (check.data.status !== 'downloading') {
+                  clearInterval(voicePollRef.current);
+                  voicePollRef.current = null;
+                }
+              } catch (e) {
+                console.error('Failed to poll voice status', e);
+                clearInterval(voicePollRef.current);
+                voicePollRef.current = null;
+              }
           }, 3000);
       }
     } catch (e) {
@@ -102,7 +123,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     try {
       const res = await axios.get(`${apiUrl}/api/db/sync`);
       setSyncResult(res.data);
-    } catch (e) {
+    } catch {
       setSyncResult({ error: t('toastError') });
     } finally {
       setIsSyncing(false);
@@ -308,7 +329,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
     if (!confirm(t('settingsShutdownConfirm'))) return;
 
     try {
-      try { window.close(); } catch (e) { }
+      try { window.close(); } catch { /* Desktop shells may block window.close(). */ }
 
       await axios.post(`${apiUrl}/shutdown`);
 
@@ -738,7 +759,7 @@ export function SettingsModal({ isOpen, onClose, isAuthenticated, organizeByArti
                 <div className="flex items-center justify-between p-3 hover:bg-surface-container rounded-2xl transition-colors cursor-pointer" onClick={async () => {
                   const newVal = !startMinimized;
                   setStartMinimized(newVal);
-                  try { await axios.post(`${apiUrl}/api/settings/start_minimized`, { value: newVal }); } catch(e) {}
+                  try { await axios.post(`${apiUrl}/api/settings/start_minimized`, { value: newVal }); } catch { /* Keep the local toggle responsive. */ }
                 }}>
                   <div>
                     <p className="text-sm font-semibold text-on-surface">Iniciar minimizado na bandeja</p>

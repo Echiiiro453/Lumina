@@ -64,6 +64,20 @@ from urllib.parse import urlparse
 
 app = FastAPI()
 
+# R2.4: padroniza o payload de erro HTTP como {"detail": ..., "code": ...}.
+# `code` é lido do header X-Error-Code (setado por helpers que sabem classificar, ex:
+# cookies/limite); quando ausente fica null — 100% retrocompatível (quem lê só `detail`
+# continua funcionando). Não intercepta ValidationError (FastAPI já tem handler próprio).
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    code = getattr(exc, "headers", None) or {}
+    if isinstance(code, dict):
+        code = code.get("X-Error-Code")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": code},
+    )
+
 from routers.downloads import router as downloads_router
 from routers.library import router as library_router
 from routers.settings import router as settings_router
@@ -173,7 +187,7 @@ async def get_logs():
 async def sync_db():
     """Syncs the DB with disk, marking deleted files as 'missing'."""
     from utils import get_downloads_dir
-    result = sync_db_with_disk(get_downloads_dir())
+    result = sync_db_with_disk(get_downloads_dir(), force=True)
     return {"status": "ok", **result}
 
 @app.get("/version")
@@ -302,6 +316,7 @@ async def startup_event():
     
     # Initialize download_sem from database so it respects the saved user settings on boot
     import downloader
+    effective_concurrency = downloader.MAX_CONCURRENT_DOWNLOADS  # fallback (4)
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -311,11 +326,17 @@ async def startup_event():
         if row:
             value = max(1, min(8, int(row['value'])))
             downloader.download_sem = asyncio.Semaphore(value)
+            effective_concurrency = value
             print(f"[Startup] Concurrent downloads restored to {value}")
     except Exception as e:
         print(f"[Startup] Error loading concurrent downloads setting: {e}")
 
-    for _ in range(20):
+    # Spawn exactly as many workers as the configured concurrency limit. Antes havia um
+    # pool fixo de 20 corrotinas worker_loop competindo pelo semáforo — funcionalmente o
+    # limite efetivo já era o do semáforo, mas ficavam 20 tarefas ociosas sempre (mesmo
+    # com limite=1). Agora o nº de workers acompanha o limite configurado.
+    worker_count = effective_concurrency
+    for _ in range(worker_count):
         asyncio.create_task(worker_loop())
     asyncio.create_task(ws_broadcast_loop())
     
@@ -367,83 +388,8 @@ class RetryRequest(BaseModel):
     playlist_id: str
     video_id: str
 
-@app.get("/download/jobs")
-async def get_all_jobs():
-    return {job_id: asdict(state) for job_id, state in jobs.items()}
-
 # --- Subscriptions API ---
 import subscriptions
-
-class SubscriptionRequest(BaseModel):
-    playlist_id: Optional[str] = None
-    url: str
-    title: str
-    platform: str
-
-@app.get("/api/subscriptions")
-def api_get_subscriptions():
-    return subscriptions.get_all_subscriptions()
-
-@app.post("/api/subscriptions/add")
-def api_add_subscription(req: SubscriptionRequest):
-    p_id = req.playlist_id if req.playlist_id else req.url
-    success = subscriptions.add_subscription(p_id, req.url, req.title, req.platform)
-    if success:
-        return {"success": True, "message": "Inscrito com sucesso"}
-    return {"success": False, "message": "Já inscrito nesta playlist"}
-
-@app.post("/api/subscriptions/remove")
-def api_remove_subscription(req: dict):
-    playlist_id = req.get("playlist_id")
-    if playlist_id:
-        subscriptions.remove_subscription(playlist_id)
-        return {"success": True}
-    raise HTTPException(status_code=400, detail="Missing playlist_id")
-
-@app.get("/api/subscriptions/{playlist_id:path}/downloads")
-def api_get_subscription_downloads(playlist_id: str):
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT video_id, title, file_path, created_at, status FROM downloads WHERE playlist_id = ? ORDER BY created_at DESC", (playlist_id,))
-        rows = cur.fetchall()
-        conn.close()
-        downloads = []
-        for r in rows:
-            downloads.append({
-                "video_id": r["video_id"],
-                "title": r["title"],
-                "file_path": r["file_path"],
-                "created_at": r["created_at"],
-                "status": r["status"]
-            })
-        return downloads
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- Favorites API ---
-class FavoriteRequest(BaseModel):
-    video_id: str
-    title: str
-    file_path: str
-
-@app.get("/api/favorites")
-def api_get_favorites():
-    return {"favorites": get_favorites()}
-
-@app.post("/api/favorites/add")
-def api_add_favorite(req: FavoriteRequest):
-    added = add_favorite(req.video_id, req.title, req.file_path)
-    return {"success": True, "added": added}
-
-@app.delete("/api/favorites/{video_id}")
-def api_remove_favorite(video_id: str):
-    remove_favorite(video_id)
-    return {"success": True}
-
-@app.get("/api/favorites/check/{video_id}")
-def api_is_favorite(video_id: str):
-    return {"is_favorite": is_favorite(video_id)}
 
 # --- Tag Editor API ---
 import tag_editor as _tag_editor
@@ -507,10 +453,21 @@ class FetchLyricsRequest(BaseModel):
 
 @app.get("/api/tags/read")
 def api_read_tags(file_path: str):
-    return _tag_editor.read_tags(file_path)
+    from utils import safe_resolve, SafePathError
+    try:
+        safe = safe_resolve(file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _tag_editor.read_tags(safe)
 
 @app.post("/api/tags/save")
 def api_write_tags(req: TagWriteRequest):
+    from utils import safe_resolve, SafePathError
+    try:
+        req.file_path = safe_resolve(req.file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     data = {k: v for k, v in req.dict().items() if v is not None and k != "file_path"}
     result = _tag_editor.write_tags(req.file_path, data)
     
@@ -661,14 +618,6 @@ def clean_url(url: str) -> str:
 
 
 
-@app.post("/open_folder")
-def open_folder():
-    downloads_dir = get_downloads_dir()
-    if os.path.exists(downloads_dir): os.startfile(downloads_dir)
-    return {"status": "opened"}
-
-
-
 class RadioRequest(BaseModel):
     seed_title: str
 
@@ -725,15 +674,32 @@ def get_auth_status():
 @app.post("/upload_cookies")
 async def upload_cookies(file: UploadFile = File(...)):
     try:
-        print(f"[Upload] Recebendo arquivo de cookies: {file.filename}")
+        # Lê o conteúdo em memória (limite de 2 MB) para validar antes de persistir.
+        # Antes o arquivo era copiado direto via shutil.copyfileobj sem nenhuma checagem.
+        MAX_COOKIE_SIZE = 2 * 1024 * 1024  # 2 MB
+        content = await file.read(MAX_COOKIE_SIZE + 1)
+        if len(content) > MAX_COOKIE_SIZE:
+            raise HTTPException(status_code=413, detail="Arquivo de cookies muito grande (máx 2 MB).")
+        if not content:
+            raise HTTPException(status_code=400, detail="Arquivo de cookies vazio.")
+
+        # Valida o header Netscape antes de gravar (o mesmo check que /auth_status faz).
+        try:
+            head = content[:1024].decode('utf-8', errors='ignore')
+        except Exception:
+            head = ""
+        if "# Netscape HTTP Cookie File" not in head and "# HTTP Cookie File" not in head:
+            raise HTTPException(status_code=400, detail="Formato inválido: esperado cabeçalho Netscape '# Netscape HTTP Cookie File'.")
+
         cookie_path = os.path.join(get_data_dir(), "cookies.txt")
-        print(f"[Upload] Salvando em: {cookie_path}")
-        
         with open(cookie_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        print("[Upload] Cookies salvos com sucesso!")
+            buffer.write(content)
+
+        # Log sem expor conteúdo do cookie.
+        print(f"[Upload] Cookies salvos em {cookie_path} ({len(content)} bytes)")
         return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Upload] Erro ao salvar cookies: {e}")
         raise HTTPException(status_code=500, detail=f"Erro no servidor: {str(e)}")
@@ -773,80 +739,6 @@ def get_terms_content():
 
 
 
-@app.post("/api/choose_file")
-def choose_file():
-    try:
-        import webview
-        if webview.windows:
-            window = webview.windows[0]
-            result = window.create_file_dialog(
-                webview.OPEN_DIALOG,
-                allow_multiple=False,
-                file_types=('Audio Files (*.mp3;*.wav;*.m4a;*.flac)', 'All Files (*.*)')
-            )
-            if result and len(result) > 0:
-                return {"status": "ok", "file": result[0]}
-        return {"status": "error", "message": "Nenhuma janela ativa ou ação cancelada."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-class ConvertRequest(BaseModel):
-    input_path: str
-    output_format: str
-
-@app.post("/api/convert")
-async def convert_file(request: ConvertRequest):
-    try:
-        from utils import get_downloads_dir
-        input_path = request.input_path
-        if not os.path.exists(input_path):
-            raise HTTPException(status_code=404, detail="Arquivo original não encontrado.")
-
-        downloads_dir = get_downloads_dir()
-        filename = os.path.basename(input_path)
-        name, _ = os.path.splitext(filename)
-        output_filename = f"{name}.{request.output_format.lower()}"
-        output_path = os.path.join(downloads_dir, output_filename)
-
-        # Check if ffmpeg exists in root
-        ffmpeg_path = os.path.join(get_base_dir(), "ffmpeg.exe")
-        if not os.path.exists(ffmpeg_path):
-            ffmpeg_path = "ffmpeg" # Fallback to system ffmpeg
-
-        cmd = [
-            ffmpeg_path,
-            "-y",
-            "-i", input_path,
-        ]
-        
-        is_audio = request.output_format.lower() in ['mp3', 'wav', 'flac', 'm4a', 'ogg']
-        if is_audio:
-            cmd.append("-vn") # No video
-            
-        if request.output_format.lower() == 'mp3':
-            cmd.extend(["-q:a", "0"]) # Best VBR quality
-        elif request.output_format.lower() == 'ogg':
-            cmd.extend(["-q:a", "7"])
-
-        cmd.append(output_path)
-
-        CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            creationflags=CREATE_NO_WINDOW
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            raise Exception(f"FFMPEG Error: {stderr.decode('utf-8', errors='ignore')}")
-
-        return {"status": "success", "output_path": output_path}
-    except Exception as e:
-        print(f"Error in convert: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 class OpenExternalRequest(BaseModel):
     file_path: str
 
@@ -869,7 +761,10 @@ def _run_ffprobe(file_path: str, ffprobe_exe: str) -> dict:
         ffprobe_exe, "-v", "quiet", "-print_format", "json",
         "-show_streams", "-show_format", file_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=30)
+    except subprocess.TimeoutExpired:
+        return {}
     data = json.loads(result.stdout or "{}")
     audio_stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {})
     fmt = data.get("format", {})
@@ -996,14 +891,14 @@ async def spectral_analysis(req: SpectralAnalysisRequest):
     Returns: spectrogram (base64 PNG), cutoff_hz, quality_risk, metadata.
     """
     import subprocess, base64, tempfile
-    from utils import get_resource_path, get_downloads_dir
+    from utils import get_resource_path, safe_resolve, SafePathError
 
-    file_path = req.file_path
-    # Resolve relative paths (stored as bare filename in DB) the same way /api/track_metadata does
-    if not os.path.isabs(file_path) and not os.path.exists(file_path):
-        file_path = os.path.join(get_downloads_dir(), file_path)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    # file_path confinado à biblioteca (downloads dir). Antes aceitava paths absolutos
+    # arbitrários se existissem, permitindo analisar arquivos fora da biblioteca.
+    try:
+        file_path = safe_resolve(req.file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     ffmpeg_exe = get_resource_path("ffmpeg.exe")
     ffprobe_exe = get_resource_path("ffprobe.exe")
@@ -1117,10 +1012,11 @@ def get_miniplayer_state():
 @app.post("/api/open_external")
 def open_external(request: OpenExternalRequest):
     try:
-        from utils import get_downloads_dir
-        abs_path = os.path.join(get_downloads_dir(), request.file_path)
-        if not os.path.exists(abs_path):
-            raise HTTPException(status_code=404, detail="File not found")
+        from utils import safe_resolve, SafePathError
+        try:
+            abs_path = safe_resolve(request.file_path, allow_dirs=True)
+        except SafePathError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         if os.name == 'nt':
             os.startfile(abs_path)
         elif sys.platform == 'darwin':
@@ -1128,6 +1024,8 @@ def open_external(request: OpenExternalRequest):
         else:
             subprocess.call(('xdg-open', abs_path))
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1135,9 +1033,12 @@ def open_external(request: OpenExternalRequest):
 async def play_external(request: PlayExternalRequest):
     import os
     abs_path = os.path.abspath(request.file_path)
-    if not os.path.exists(abs_path):
+    # Este endpoint é acionado por associação de arquivo do SO (abrir com Lumina), então
+    # o arquivo pode estar em qualquer lugar escolhido pelo usuário — não confinamos a
+    # downloads_dir. Mas validamos que é um arquivo real (não diretório nem path malformado).
+    if not os.path.isfile(abs_path):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # Broadcast to frontend to play immediately
     await manager.broadcast_json({"type": "PLAY_EXTERNAL", "file_path": abs_path})
     
@@ -1168,88 +1069,28 @@ async def set_default_player():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/library")
-def get_library():
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT playlist_id, video_id, title, file_path, created_at, url FROM downloads WHERE status = 'downloaded' ORDER BY created_at DESC;")
-        rows = cur.fetchall()
-        conn.close()
-        library = []
-        for r in rows:
-            library.append({
-                "playlist_id": r["playlist_id"],
-                "video_id": r["video_id"],
-                "title": r["title"],
-                "file_path": r["file_path"],
-                "created_at": r["created_at"],
-                "url": r["url"]
-            })
-        return {"status": "success", "library": library}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/history")
-def get_history(limit: int = 100, offset: int = 0):
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT playlist_id, video_id, title, file_path, status, created_at, url
-            FROM downloads
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?;
-        """, (limit, offset))
-        rows = cur.fetchall()
-        cur.execute("SELECT COUNT(*) as total FROM downloads")
-        total = cur.fetchone()["total"]
-        conn.close()
-        history = []
-        for r in rows:
-            history.append({
-                "video_id": r["video_id"],
-                "title": r["title"],
-                "file_path": r["file_path"],
-                "status": r["status"],
-                "created_at": r["created_at"],
-                "url": r["url"]
-            })
-        return {"history": history, "total": total}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/history/{video_id}")
-def delete_history_item(video_id: str):
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM downloads WHERE video_id = ?", (video_id,))
-        conn.commit()
-        conn.close()
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 class FixMetadataRequest(BaseModel):
     file_path: str
 
 @app.post("/api/fix_metadata")
 def fix_metadata(request: FixMetadataRequest):
     try:
-        from utils import get_downloads_dir
+        from utils import safe_resolve, SafePathError
         from shazam_fixer import fix_metadata_sync
-        
-        abs_path = os.path.join(get_downloads_dir(), request.file_path)
-        if not os.path.exists(abs_path):
-            raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
-            
+
+        try:
+            abs_path = safe_resolve(request.file_path)
+        except SafePathError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         result = fix_metadata_sync(abs_path)
         if result.get("success"):
             return {"status": "success", "data": result}
         else:
             raise HTTPException(status_code=400, detail=result.get("error", "Erro desconhecido"))
-            
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1349,22 +1190,25 @@ def api_choose_lrc_file():
 def api_convert(req: ConvertRequest):
     import subprocess
     import time
-    from utils import get_downloads_dir
-    
-    if not os.path.exists(req.input_path):
-        raise HTTPException(status_code=400, detail="Arquivo de entrada não encontrado.")
-        
+    from utils import get_downloads_dir, safe_resolve, SafePathError
+
+    # input_path confinado à biblioteca. Antes aceitava qualquer path absoluto.
+    try:
+        input_path = safe_resolve(req.input_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     valid_formats = ['mp3', 'wav', 'flac', 'm4a', 'ogg']
     if req.output_format.lower() not in valid_formats:
         raise HTTPException(status_code=400, detail="Formato de saída inválido.")
-        
-    filename = os.path.basename(req.input_path)
+
+    filename = os.path.basename(input_path)
     name_only = os.path.splitext(filename)[0]
-    
+
     downloads_dir = get_downloads_dir()
     converted_dir = os.path.join(downloads_dir, "converted")
     os.makedirs(converted_dir, exist_ok=True)
-    
+
     output_path = os.path.join(converted_dir, f"{name_only}_converted.{req.output_format.lower()}")
     
     # Se o arquivo já existir, adiciona timestamp
@@ -1374,7 +1218,7 @@ def api_convert(req: ConvertRequest):
     cmd = [
         'ffmpeg',
         '-y', # overwrite
-        '-i', req.input_path
+        '-i', input_path
     ]
     
     # Format specific options
@@ -1395,21 +1239,38 @@ def api_convert(req: ConvertRequest):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             creationflags=CREATE_NO_WINDOW,
-            text=True
+            text=True,
+            timeout=600
         )
-        
+
         if process.returncode != 0:
-            print(f"FFmpeg error: {process.stderr}")
+            # Sanitiza stderr antes de logar (paths absolutos vazam usuário/estrutura).
+            try:
+                from utils import sanitize_paths
+                err_log = sanitize_paths(process.stderr)
+            except Exception:
+                err_log = "FFmpeg conversion error"
+            print(f"FFmpeg error: {err_log}")
             raise HTTPException(status_code=500, detail="Erro na conversão do arquivo pelo FFmpeg.")
-            
+
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="FFmpeg não encontrado no sistema.")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Conversão excedeu o tempo limite (10 min).")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-        
+
+    # Não retorna o path absoluto completo; só o basename relativo à biblioteca.
+    try:
+        from utils import get_downloads_dir as _gdd
+        rel_out = os.path.relpath(output_path, _gdd())
+    except Exception:
+        rel_out = os.path.basename(output_path)
     return {
         "status": "success",
-        "output_path": output_path
+        "output_path": rel_out
     }
 
 @app.post("/api/upload_wallpaper")
@@ -1513,11 +1374,11 @@ oLink.Save
 @app.get("/api/track_metadata")
 def get_track_metadata(file_path: str):
     import base64
-    from utils import get_downloads_dir
-    abs_path = os.path.join(get_downloads_dir(), file_path)
-    
-    if not os.path.exists(abs_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    from utils import safe_resolve, SafePathError
+    try:
+        abs_path = safe_resolve(file_path)
+    except SafePathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
         
     ext = os.path.splitext(abs_path)[1].lower()
     lyrics = ""
@@ -1604,438 +1465,6 @@ import socket
 
 
 # Mobile Sync Security
-mobile_tokens = {} # token -> {"expires_at": float, "approved": bool, "device_name": str}
-
-@app.post("/api/mobile/token/create")
-def api_mobile_token_create():
-    import uuid, time
-    token = str(uuid.uuid4())
-    mobile_tokens[token] = {"expires_at": time.time() + 300, "approved": False, "device_name": None}
-    return {"token": token}
-
-@app.get("/api/mobile/token/status")
-def api_mobile_token_status(token: str):
-    import time
-    if token not in mobile_tokens:
-        raise HTTPException(status_code=404, detail="Token not found")
-    tdata = mobile_tokens[token]
-    if time.time() > tdata["expires_at"]:
-        del mobile_tokens[token]
-        raise HTTPException(status_code=400, detail="Token expired")
-    return {"approved": tdata["approved"], "device_name": tdata["device_name"]}
-
-@app.post("/api/mobile/token/approve")
-def api_mobile_token_approve(token: str):
-    if token not in mobile_tokens:
-        raise HTTPException(status_code=404, detail="Token not found")
-    mobile_tokens[token]["approved"] = True
-    return {"status": "ok"}
-
-def verify_mobile_token(token: str):
-    import time
-    if not token or token not in mobile_tokens:
-        raise HTTPException(status_code=403, detail="Acesso negado: Token invalido ou ausente")
-    tdata = mobile_tokens[token]
-    if time.time() > tdata["expires_at"]:
-        del mobile_tokens[token]
-        raise HTTPException(status_code=403, detail="Acesso negado: Token expirado")
-    if not tdata["approved"]:
-        raise HTTPException(status_code=403, detail="Acesso negado: Aguardando aprovacao no PC")
-
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
-@app.get("/api/network/ip")
-def api_network_ip():
-    return {"ip": get_local_ip()}
-
-@app.get("/api/downloads/list")
-def api_downloads_list(token: str = None):
-    verify_mobile_token(token)
-    try:
-        d_dir = get_downloads_dir()
-        files = []
-        if os.path.exists(d_dir):
-            for f in os.listdir(d_dir):
-                if f.lower().endswith(('.mp3', '.m4a', '.flac', '.mp4')):
-                    filepath = os.path.join(d_dir, f)
-                    stat = os.stat(filepath)
-                    files.append({
-                        "name": f,
-                        "size": stat.st_size,
-                        "mtime": stat.st_mtime
-                    })
-            files.sort(key=lambda x: x['mtime'], reverse=True)
-        return {"files": files}
-    except Exception as e:
-        return {"error": str(e)}
-
-import uuid
-import threading
-
-zip_jobs = {}
-
-class ZipRequest(BaseModel):
-    files: List[str]
-
-def create_zip_job(job_id, files_to_zip):
-    try:
-        d_dir = get_downloads_dir()
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-        
-        with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
-            total = len(files_to_zip)
-            for i, filename in enumerate(files_to_zip):
-                filepath = os.path.join(d_dir, filename)
-                if os.path.exists(filepath):
-                    zf.write(filepath, filename)
-                zip_jobs[job_id]["progress"] = int(((i + 1) / total) * 100)
-                zip_jobs[job_id]["current_file"] = filename
-                
-        tmp.close()
-        zip_jobs[job_id]["status"] = "done"
-        zip_jobs[job_id]["filepath"] = tmp.name
-    except Exception as e:
-        zip_jobs[job_id]["status"] = "error"
-        zip_jobs[job_id]["error"] = str(e)
-
-@app.post("/api/downloads/zip/start")
-def api_downloads_zip_start(req: ZipRequest, token: str = None):
-    verify_mobile_token(token)
-    if not req.files:
-        raise HTTPException(status_code=400, detail="Nenhum arquivo selecionado")
-    
-    job_id = str(uuid.uuid4())
-    zip_jobs[job_id] = {
-        "status": "processing",
-        "progress": 0,
-        "total": len(req.files),
-        "current_file": "",
-        "filepath": None
-    }
-    
-    t = threading.Thread(target=create_zip_job, args=(job_id, req.files))
-    t.start()
-    return {"job_id": job_id}
-
-@app.get("/api/downloads/zip/status/{job_id}")
-def api_downloads_zip_status(job_id: str, token: str = None):
-    verify_mobile_token(token)
-    if job_id not in zip_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return zip_jobs[job_id]
-
-
-@app.get("/api/downloads/zip/download/{job_id}")
-def api_downloads_zip_download(job_id: str, background_tasks: BackgroundTasks, token: str = None):
-    verify_mobile_token(token)
-    if job_id not in zip_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = zip_jobs[job_id]
-    if job["status"] != "done":
-        raise HTTPException(status_code=400, detail="Job not finished yet")
-    
-    filepath = job["filepath"]
-    
-    def cleanup():
-        try:
-            os.remove(filepath)
-            del zip_jobs[job_id]
-        except:
-            pass
-            
-    background_tasks.add_task(cleanup)
-    
-    return FileResponse(
-        filepath,
-        media_type='application/zip',
-        filename='Lumina_Downloads.zip',
-        background=None
-    )
-
-@app.get("/api/mobile", response_class=HTMLResponse)
-def mobile_ui(request: Request, token: str = None):
-    import time
-    # Check if token is valid (even if not approved yet, we allow rendering the UI so the UI can do polling)
-    if not token or token not in mobile_tokens:
-        return HTMLResponse("<h1>Acesso Negado: Token inválido ou ausente. Leia o QR Code novamente.</h1>", status_code=403)
-    tdata = mobile_tokens[token]
-    if time.time() > tdata["expires_at"]:
-        return HTMLResponse("<h1>Acesso Negado: Sessão expirada (5 minutos). Leia o QR Code novamente.</h1>", status_code=403)
-        
-    # Set device name from User-Agent if not set
-    if not tdata["device_name"]:
-        ua = request.headers.get("user-agent", "Dispositivo Desconhecido")
-        # simplistic extraction
-        if "iPhone" in ua: name = "iPhone"
-        elif "Android" in ua: name = "Android"
-        elif "Macintosh" in ua: name = "MacBook"
-        elif "Windows" in ua: name = "Windows PC"
-        else: name = "Celular"
-        mobile_tokens[token]["device_name"] = name
-
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Lumina Sync</title>
-        <style>
-        :root { --bg: #121212; --card: #1E1E1E; --primary: #FF0050; --text: #FFFFFF; --text-sec: #AAAAAA; }
-            * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-            body { margin: 0; padding: 0; background-color: var(--bg); color: var(--text); padding-bottom: 80px; }
-            header { background: var(--card); padding: 16px; text-align: center; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 10; }
-            h1 { margin: 0 0 4px 0; font-size: 20px; font-weight: 700; color: var(--primary); }
-            .subtitle { font-size: 12px; color: var(--text-sec); margin: 0; }
-            .container { padding: 12px 16px; }
-            
-            .controls-bar { display: flex; gap: 8px; margin-bottom: 12px; justify-content: space-between; align-items: center; }
-            .select-btn { background: transparent; border: 1px solid #333; color: var(--text); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
-            
-            .file-card { background: var(--card); padding: 14px; border-radius: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-            .checkbox-wrapper { width: 24px; height: 24px; flex-shrink: 0; border: 2px solid #555; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
-            .file-card.selected .checkbox-wrapper { background: var(--primary); border-color: var(--primary); }
-            .file-card.selected .checkbox-wrapper::after { content: "✓"; color: white; font-weight: bold; }
-            
-            .file-info { flex: 1; min-width: 0; }
-            .file-name { font-weight: 500; font-size: 14px; margin: 0 0 3px 0; word-break: break-word; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .file-meta { font-size: 12px; color: var(--text-sec); margin: 0; }
-            
-            .empty { text-align: center; color: var(--text-sec); padding: 40px 20px; }
-            #loading { text-align: center; padding: 40px; color: var(--text-sec); }
-            
-            .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); border-top: 1px solid #333; padding: 16px; display: flex; transform: translateY(100%); transition: transform 0.3s; z-index: 20; }
-            .bottom-bar.visible { transform: translateY(0); }
-            .zip-btn { width: 100%; background: var(--primary); color: white; border: none; padding: 14px; border-radius: 10px; font-weight: 700; font-size: 16px; cursor: pointer; }
-            
-            .progress-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
-            .progress-modal.visible { opacity: 1; pointer-events: auto; }
-            .progress-box { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 400px; text-align: center; }
-            .progress-bar-bg { width: 100%; height: 8px; background: #333; border-radius: 4px; margin: 16px 0; overflow: hidden; }
-            .progress-bar-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s; }
-            .progress-text { font-size: 14px; color: var(--text-sec); margin-bottom: 8px; word-break: break-all; }
-            .progress-title { font-weight: bold; font-size: 18px; margin: 0 0 8px 0; }
-        </style>
-    </head>
-    <body>
-        
-        <div id="approval-overlay" style="position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;">
-            <h2 style="color:var(--primary);margin-bottom:10px;">Aguardando Autorização</h2>
-            <p style="color:var(--text-sec);font-size:16px;">Por favor, clique em <b>Aprovar</b> no seu computador para acessar as músicas.</p>
-            <div style="margin-top:30px;width:40px;height:40px;border:4px solid #333;border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;"></div>
-            <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
-        </div>
-        
-        <header>
-
-            <h1>Lumina Sync</h1>
-            <p class="subtitle" id="subtitle">Carregando...</p>
-        </header>
-        
-        <div class="container" id="controls" style="display:none;">
-            <div class="controls-bar">
-                <button class="select-btn" id="btn-select-all">Selecionar Tudo</button>
-                <button class="select-btn" id="btn-deselect-all">Desmarcar</button>
-            </div>
-        </div>
-        
-        <div class="container" id="file-list">
-            <div id="loading">Carregando musicas...</div>
-        </div>
-        
-        <div class="bottom-bar" id="bottom-bar">
-            <button class="zip-btn" id="zip-btn">Baixar 0 Músicas (.zip)</button>
-        </div>
-        
-        <div class="progress-modal" id="progress-modal">
-            <div class="progress-box">
-                <h3 class="progress-title">Preparando ZIP...</h3>
-                <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
-                <div class="progress-text" id="progress-text">Iniciando...</div>
-                <div class="progress-text" id="progress-percent" style="font-weight:bold; color:white">0%</div>
-            </div>
-        </div>
-
-        <script>
-            const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get("token");
-
-            let allFiles = [];
-            let selectedFiles = new Set();
-
-            
-            async function pollApproval() {
-                try {
-                    const res = await fetch('/api/mobile/token/status?token=' + token);
-                    if (res.status === 404 || res.status === 400 || res.status === 403) {
-                        document.body.innerHTML = '<div style="padding:40px;text-align:center;color:white;">Sessão expirada ou negada. Feche e abra o QR Code no PC novamente.</div>';
-                        return;
-                    }
-                    const data = await res.json();
-                    if (data.approved) {
-                        document.getElementById('approval-overlay').style.display = 'none';
-                        loadFiles();
-                    } else {
-                        setTimeout(pollApproval, 1000);
-                    }
-                } catch(e) {
-                    setTimeout(pollApproval, 1000);
-                }
-            }
-
-            function formatBytes(bytes, decimals = 2) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const dm = decimals < 0 ? 0 : decimals;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-            }
-
-            function formatDate(ts) {
-                const d = new Date(ts * 1000);
-                return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            }
-            
-            function updateSelectionUI() {
-                const count = selectedFiles.size;
-                const bar = document.getElementById('bottom-bar');
-                const btn = document.getElementById('zip-btn');
-                
-                if (count > 0) {
-                    bar.classList.add('visible');
-                    btn.innerText = `Baixar ${count} Música${count > 1 ? 's' : ''} (.zip)`;
-                } else {
-                    bar.classList.remove('visible');
-                }
-                
-                document.querySelectorAll('.file-card').forEach(card => {
-                    const filename = card.dataset.filename;
-                    if (selectedFiles.has(filename)) {
-                        card.classList.add('selected');
-                    } else {
-                        card.classList.remove('selected');
-                    }
-                });
-            }
-
-            async function loadFiles() {
-                try {
-                    const res = await fetch('/api/downloads/list?token=' + token);
-                    const data = await res.json();
-                    const container = document.getElementById('file-list');
-                    container.innerHTML = '';
-                    
-                    if (!data.files || data.files.length === 0) {
-                        document.getElementById('subtitle').innerText = 'Nenhum arquivo';
-                        container.innerHTML = '<div class="empty">Nenhuma música encontrada no seu PC. Baixe algo primeiro!</div>';
-                        return;
-                    }
-                    
-                    allFiles = data.files.map(f => f.name);
-                    document.getElementById('subtitle').innerText = `${allFiles.length} arquivos encontrados`;
-                    document.getElementById('controls').style.display = 'block';
-                    
-                    data.files.forEach(f => {
-                        const card = document.createElement('div');
-                        card.className = 'file-card';
-                        card.dataset.filename = f.name;
-                        card.innerHTML = `
-                            <div class="checkbox-wrapper"></div>
-                            <div class="file-info">
-                                <p class="file-name">${f.name}</p>
-                                <p class="file-meta">${formatBytes(f.size)} • ${formatDate(f.mtime)}</p>
-                            </div>
-                        `;
-                        card.addEventListener('click', () => {
-                            if (selectedFiles.has(f.name)) {
-                                selectedFiles.delete(f.name);
-                            } else {
-                                selectedFiles.add(f.name);
-                            }
-                            updateSelectionUI();
-                        });
-                        container.appendChild(card);
-                    });
-                } catch (e) {
-                    document.getElementById('file-list').innerHTML = '<div class="empty" style="color: #ff4444">Erro ao carregar arquivos: ' + e.message + '</div>';
-                }
-            }
-            
-            document.getElementById('btn-select-all').addEventListener('click', () => {
-                allFiles.forEach(f => selectedFiles.add(f));
-                updateSelectionUI();
-            });
-            
-            document.getElementById('btn-deselect-all').addEventListener('click', () => {
-                selectedFiles.clear();
-                updateSelectionUI();
-            });
-            
-            document.getElementById('zip-btn').addEventListener('click', async () => {
-                if (selectedFiles.size === 0) return;
-                
-                const filesArray = Array.from(selectedFiles);
-                const modal = document.getElementById('progress-modal');
-                modal.classList.add('visible');
-                
-                try {
-                    const res = await fetch('/api/downloads/zip/start?token=' + token, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ files: filesArray })
-                    });
-                    const data = await res.json();
-                    
-                    if (!data.job_id) throw new Error("Falha ao iniciar trabalho");
-                    
-                    const jobId = data.job_id;
-                    const poll = setInterval(async () => {
-                        const statusRes = await fetch(`/api/downloads/zip/status/${jobId}?token=` + token);
-                        const statusData = await statusRes.json();
-                        
-                        document.getElementById('progress-fill').style.width = statusData.progress + '%';
-                        document.getElementById('progress-percent').innerText = statusData.progress + '%';
-                        document.getElementById('progress-text').innerText = "Processando: " + (statusData.current_file || "...");
-                        
-                        if (statusData.status === 'done') {
-                            clearInterval(poll);
-                            document.getElementById('progress-text').innerText = "Pronto! Iniciando download...";
-                            setTimeout(() => {
-                                modal.classList.remove('visible');
-                                window.location.href = `/api/downloads/zip/download/${jobId}?token=` + token;
-                                selectedFiles.clear();
-                                updateSelectionUI();
-                            }, 1500);
-                        } else if (statusData.status === 'error') {
-                            clearInterval(poll);
-                            alert("Erro: " + statusData.error);
-                            modal.classList.remove('visible');
-                        }
-                    }, 1000);
-                    
-                } catch(e) {
-                    alert("Erro ao iniciar download: " + e.message);
-                    modal.classList.remove('visible');
-                }
-            });
-            
-            pollApproval();
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
-
 from utils import get_downloads_dir, get_data_dir
 try:
     os.makedirs(get_downloads_dir(), exist_ok=True)

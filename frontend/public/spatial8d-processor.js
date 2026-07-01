@@ -17,6 +17,7 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.sampleRate = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     // Fractional Delay Lines (max 2ms)
@@ -58,6 +59,7 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
     this.speed = 0;
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.motionMode !== undefined) this.motionMode = e.data.motionMode;
       if (e.data.radiusM !== undefined) this.radiusM = e.data.radiusM;
       if (e.data.speed !== undefined) this.speed = e.data.speed;
@@ -231,8 +233,7 @@ class Spatial8DProcessor extends AudioWorkletProcessor {
       const hasSignal = inL_rms > 0.00001 || inR_rms > 0.00001;
       
       if (hasSignal) {
-        this.port.postMessage({
-          type: 'telemetry',
+        if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
           name: 'Spatial8D',
           mode: this.motionMode,
           azimuthDeg: panAngle.toFixed(0),

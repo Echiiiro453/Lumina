@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Lumina Harmonic Saturation Processor v9.3
  * Three analogue-modelled saturation modes with Second-Order ADAA (Anti-Derivative Anti-Aliasing).
@@ -16,6 +17,8 @@
 class SaturationProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
+    this.port.onmessage = (e) => { if (e.data && e.data.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; } };
     this.mode = 'tube';
     this.drive = 0.3;  // 0–1
     this.mix = 0.25; // wet/dry 0–1
@@ -514,8 +517,7 @@ class SaturationProcessor extends AudioWorkletProcessor {
       const diffRMS = Math.sqrt(this._dbgDiff / this._dbgSamples);
       const wetRMS = Math.sqrt(this._dbgWet / this._dbgSamples);
 
-      this.port.postMessage({
-        type: 'telemetry',
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: 'Saturation',
         inRMS: inRMS.toFixed(6),
         outRMS: outRMS.toFixed(6),

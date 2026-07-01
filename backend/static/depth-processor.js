@@ -9,6 +9,7 @@
 class DepthProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     this.sampleRate = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     this.active = false;
@@ -36,6 +37,7 @@ class DepthProcessor extends AudioWorkletProcessor {
     this._sumTransientAtt = 0;
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.active !== undefined) this.active = !!e.data.active;
       if (e.data.depth !== undefined) this.depth = Math.max(0.0, Math.min(e.data.depth, 1.0));
     };
@@ -156,8 +158,7 @@ class DepthProcessor extends AudioWorkletProcessor {
       const airAbsorptionDb = -6.0 * safeDepth;
       const hfLossDb = -3.0 * safeDepth; // Uma estimativa simplificada
       
-      this.port.postMessage({
-        type: 'telemetry',
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: 'Depth',
         depth: safeDepth.toFixed(2),
         preDelayMs: preDelayMs.toFixed(1),

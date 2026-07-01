@@ -12,6 +12,7 @@
 class MultibandWidthProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.telemetryEnabled = true;
     const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
     
     // Crossover 1: 150Hz
@@ -42,6 +43,7 @@ class MultibandWidthProcessor extends AudioWorkletProcessor {
     this.subMonoOverride = false;
     
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'setTelemetryEnabled') { this.telemetryEnabled = !!e.data.enabled; return; }
       if (e.data.width !== undefined) {
         this.width = Math.max(0, Math.min(e.data.width, 2.0));
       }
@@ -212,8 +214,7 @@ class MultibandWidthProcessor extends AudioWorkletProcessor {
       const highSideRMS = Math.sqrt(highSumL2 + highSumR2 - 2 * highSumLR);
       const highWidth = highSideRMS / (highMidRMS + eps);
 
-      this.port.postMessage({
-        type: "telemetry",
+      if (this.telemetryEnabled) this.port.postMessage({ type: 'telemetry',
         name: "MultibandStereo",
         lowCorr: isNaN(lowCorr) ? "1.00" : lowCorr.toFixed(2),
         lowWidth: Math.min(200, Math.max(0, lowWidth * 100)).toFixed(0) + "%",
